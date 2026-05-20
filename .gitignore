@@ -1,0 +1,23 @@
+# Local user configuration
+config.json
+
+# Build outputs
+build/
+dist/
+*.spec.bak
+
+# Python cache and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Logs and local editor files
+*.log
+.idea/
+.vscode/
+
+# OS clutter
+Thumbs.db
+Desktop.ini

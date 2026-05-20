@@ -1,0 +1,78 @@
+{
+  "wake_phrase": "hey jarvis",
+  "gemini_api_key": "",
+  "voice": {
+    "enabled": false,
+    "speak_responses": true,
+    "microphone_index": null,
+    "listen_timeout": 5,
+    "phrase_time_limit": 9,
+    "energy_threshold": 450,
+    "ambient_energy_multiplier": 1.8,
+    "pause_threshold": 0.9,
+    "phrase_threshold": 0.45,
+    "log_unrecognized": false,
+    "auto_start": true
+  },
+  "conversation": {
+    "enabled": true,
+    "name": "JARVIS",
+    "user_title": "sir",
+    "style": "sharp, calm, witty, loyal but not sycophantic",
+    "session_timeout_seconds": 600,
+    "humor_level": 6,
+    "talkativeness": 4
+  },
+  "apps": {
+    "notepad": {
+      "type": "command",
+      "target": "notepad"
+    },
+    "calculator": {
+      "type": "command",
+      "target": "calc"
+    },
+    "chrome": {
+      "type": "command",
+      "target": "chrome"
+    },
+    "spotify": {
+      "type": "command",
+      "target": "spotify"
+    }
+  },
+  "websites": {
+    "youtube": "https://www.youtube.com",
+    "google": "https://www.google.com",
+    "netflix": "https://www.netflix.com",
+    "chatgpt": "https://chatgpt.com"
+  },
+  "folders": {
+    "downloads": "%USERPROFILE%\\Downloads",
+    "desktop": "%USERPROFILE%\\Desktop",
+    "documents": "%USERPROFILE%\\Documents"
+  },
+  "modes": {
+    "chill mode": [
+      {
+        "type": "app",
+        "name": "chrome",
+        "delay": 1
+      },
+      {
+        "type": "website",
+        "name": "netflix"
+      }
+    ],
+    "study mode": [
+      {
+        "type": "website",
+        "url": "https://calendar.google.com"
+      },
+      {
+        "type": "website",
+        "url": "https://docs.google.com"
+      }
+    ]
+  }
+}
