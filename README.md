@@ -15,7 +15,7 @@ JARVIS is designed to be personal. Each user gets their own `config.json`, so yo
 - Minimize-to-tray support
 - One-file Windows `.exe` build with PyInstaller
 
-## Download For Friends
+## Installation
 
 The easiest way to share JARVIS is through GitHub Releases:
 
