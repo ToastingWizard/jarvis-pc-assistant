@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import threading
 import time
+import urllib.parse
 import webbrowser
 import math
 from dataclasses import dataclass
@@ -69,10 +70,21 @@ DEFAULT_CONFIG = {
     "apps": {
         "notepad": {"type": "command", "target": "notepad"},
         "calculator": {"type": "command", "target": "calc"},
+        "chrome": {"type": "command", "target": "chrome"},
+        "spotify": {"type": "command", "target": "spotify"},
     },
     "websites": {
         "youtube": "https://www.youtube.com",
         "google": "https://www.google.com",
+        "netflix": "https://www.netflix.com",
+    },
+    "playlists": {
+        "liked songs": "spotify:collection:tracks",
+        "discover weekly": "spotify:playlist:37i9dQZEVXcQ",
+    },
+    "music": {
+        "service": "spotify",
+        "default_playlist": "liked songs",
     },
     "folders": {
         "downloads": str(Path.home() / "Downloads"),
@@ -171,10 +183,16 @@ class JarvisEngine:
 
     def run_command(self, raw_command):
         command = self.strip_wake_phrase(raw_command)
+        title = self.config.get("conversation", {}).get("user_title", "sir")
         self.log(f"YOU: {raw_command}")
         if not command:
             self.respond("I am here. What are we doing today?")
             return ActionResult(True, "Ready")
+
+        music_target = self.extract_music_target(command)
+        if music_target:
+            kind, target = music_target
+            return self.play_music(target, kind)
 
         if any(p in command for p in ("start ollama", "load ollama", "wake up ollama")):
             def _start():
@@ -207,6 +225,7 @@ class JarvisEngine:
         if known:
             kind, name = known
             if kind == "modes": return self.run_mode(name)
+            if kind == "playlists": return self.play_music(name, "playlist")
             return self.open_target(name)
 
         return self.chat(command)
@@ -286,17 +305,97 @@ class JarvisEngine:
     def best_target(self, command):
         command = self.normalize(command)
         # Exact match first
-        for kind in ["modes", "apps", "websites", "folders"]:
+        for kind in ["modes", "apps", "websites", "playlists", "folders"]:
             data = self.config.get(kind, {})
             if command in data:
                 return kind, command
         # Fuzzy match for modes so "gaming mode" finds "gaming mode" even with typos
-        for kind in ["modes", "apps", "websites", "folders"]:
+        for kind in ["modes", "apps", "websites", "playlists", "folders"]:
             data = self.config.get(kind, {})
             matches = difflib.get_close_matches(command, data.keys(), n=1, cutoff=0.75)
             if matches:
                 return kind, matches[0]
         return None
+
+    def extract_music_target(self, command):
+        command = self.normalize(command)
+        if command in ("play music", "start music", "resume music", "put on music"):
+            default_playlist = self.config.get("music", {}).get("default_playlist", "")
+            return "playlist", default_playlist or "liked songs"
+
+        playlist_patterns = (
+            r"^(?:play|start|put on)\s+(.+?)\s+playlist$",
+            r"^(?:play|start|put on)\s+playlist\s+(.+)$",
+        )
+        for pattern in playlist_patterns:
+            match = re.match(pattern, command)
+            if match:
+                return "playlist", match.group(1).strip()
+
+        song_patterns = (
+            r"^(?:play|start|put on)\s+song\s+(.+)$",
+            r"^(?:play|start|put on)\s+(.+?)\s+on\s+spotify$",
+            r"^(?:play|start|put on)\s+(.+)$",
+        )
+        for index, pattern in enumerate(song_patterns):
+            match = re.match(pattern, command)
+            if match:
+                target = match.group(1).strip()
+                if target and target not in ("music", "spotify"):
+                    if index == 2 and self.best_target(target):
+                        return None
+                    return "track", target
+
+        return None
+
+    def play_music(self, target, kind="track"):
+        target = self.normalize(target)
+        playlists = self.config.get("playlists", {})
+
+        if kind == "playlist":
+            playlist_name = self.best_playlist_name(target)
+            if playlist_name:
+                url = playlists[playlist_name]
+                self.respond(f"Playing {playlist_name}, sir.")
+                self.open_url(url)
+                return ActionResult(True, url)
+            if target:
+                self.respond(f"I do not have a playlist called {target}, sir. Searching Spotify instead.")
+                return self.open_spotify_search(target)
+
+        if target in playlists:
+            self.respond(f"Playing {target}, sir.")
+            self.open_url(playlists[target])
+            return ActionResult(True, playlists[target])
+
+        return self.open_spotify_search(target)
+
+    def best_playlist_name(self, target):
+        playlists = self.config.get("playlists", {})
+        if not target:
+            return None
+        if target in playlists:
+            return target
+        stripped = target.replace(" playlist", "").strip()
+        if stripped in playlists:
+            return stripped
+        matches = difflib.get_close_matches(stripped, playlists.keys(), n=1, cutoff=0.72)
+        return matches[0] if matches else None
+
+    def open_spotify_search(self, query):
+        query = self.normalize(query)
+        if not query:
+            return self.play_music(self.config.get("music", {}).get("default_playlist", "liked songs"), "playlist")
+        encoded = urllib.parse.quote(query)
+        spotify_uri = f"spotify:search:{encoded}"
+        web_url = f"https://open.spotify.com/search/{encoded}"
+        self.respond(f"Looking for {query} on Spotify, sir.")
+        try:
+            os.startfile(spotify_uri)
+            return ActionResult(True, spotify_uri)
+        except Exception:
+            self.open_url(web_url)
+            return ActionResult(True, web_url)
 
     def open_url(self, url):
         try:
@@ -319,6 +418,12 @@ class JarvisEngine:
             self.respond(f"Opening {name} in your browser, sir.")
             self.open_url(site)
             return ActionResult(True, site)
+
+        playlist = self.config.get("playlists", {}).get(name)
+        if playlist:
+            self.respond(f"Playing {name}, sir.")
+            self.open_url(playlist)
+            return ActionResult(True, playlist)
 
         # Check Folders
         folder = self.config.get("folders", {}).get(name)
@@ -449,6 +554,8 @@ class JarvisEngine:
                     folder = self.config.get("folders", {}).get(m_name)
                     if folder:
                         self.launch(os.path.expandvars(folder))
+                elif m_type == "playlist":
+                    self.play_music(m_name, "playlist")
 
         threading.Thread(target=_run, daemon=True).start()
         return ActionResult(True, f"Started {mode_name}")
@@ -648,7 +755,7 @@ class JarvisUI:
         
         tab_row = Frame(self.sidebar, bg=self.colors["panel"])
         tab_row.pack(fill="x", pady=(0, 10))
-        for kind in ("apps", "websites", "folders", "modes"):
+        for kind in ("apps", "websites", "playlists", "folders", "modes"):
             btn = ttk.Button(tab_row, text=kind.title(), style="Tab.TButton", command=lambda k=kind: self._switch_tab(k))
             btn.pack(side=LEFT, padx=(0, 4))
 
@@ -757,6 +864,7 @@ class JarvisUI:
         labels = {
             "apps": ("Apps", "Launchable app shortcuts."),
             "websites": ("Websites", "Saved links JARVIS can open."),
+            "playlists": ("Playlists", "Spotify playlists JARVIS can play."),
             "folders": ("Folders", "Saved folders on this PC."),
             "modes": ("Your Modes", "Saved routines you can run or edit."),
         }
@@ -872,6 +980,8 @@ class JarvisUI:
 
     def is_actionable_voice_command(self, text):
         command = self.engine.strip_wake_phrase(text)
+        if self.engine.extract_music_target(command):
+            return True
         if self.engine.extract_action_target(command):
             return True
         return self.engine.best_target(command) is not None
@@ -1099,7 +1209,7 @@ class ModeBuilder:
 
         Label(body, text="Create New Mode", bg=c["bg"], fg=c["accent"],
               font=("Consolas", 16, "bold")).pack(anchor="w")
-        Label(body, text="Pick apps, websites, or folders. JARVIS will run them all when you say the mode name.",
+        Label(body, text="Pick apps, websites, playlists, or folders. JARVIS will run them all when you say the mode name.",
               bg=c["bg"], fg=c["muted"], font=("Consolas", 9)).pack(anchor="w", pady=(2, 14))
 
         name_row = Frame(body, bg=c["bg"])
@@ -1118,7 +1228,7 @@ class ModeBuilder:
 
         kind_row = Frame(left, bg=c["bg"])
         kind_row.pack(fill="x", pady=(0, 8))
-        for kind in ("apps", "websites", "folders"):
+        for kind in ("apps", "websites", "playlists", "folders"):
             ttk.Button(kind_row, text=kind.title(), command=lambda v=kind: self.select_source(v)).pack(side=LEFT, padx=(0, 6))
 
         Label(left, text="Available", bg=c["bg"], fg=c["muted"], font=("Consolas", 9)).pack(anchor="w")
@@ -1155,6 +1265,8 @@ class ModeBuilder:
     def add_selected(self):
         kind = self.source_kind.get()
         step_type = kind[:-1] if kind.endswith("s") else kind
+        if kind == "playlists":
+            step_type = "playlist"
         for index in self.source_list.curselection():
             name = self.source_list.get(index)
             self.steps.append({"type": step_type, "name": name})
@@ -1239,6 +1351,9 @@ class ItemEditor:
             ttk.Button(body, text="Browse Folder", command=self.browse_folder).pack(anchor="w")
         elif self.kind == "websites":
             lbl(body, "URL")
+            entry(body, self.value)
+        elif self.kind == "playlists":
+            lbl(body, "Spotify playlist URL or URI")
             entry(body, self.value)
         else:
             lbl(body, "Steps as JSON")

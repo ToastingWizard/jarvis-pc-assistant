@@ -47,6 +47,14 @@
     "netflix": "https://www.netflix.com",
     "chatgpt": "https://chatgpt.com"
   },
+  "playlists": {
+    "liked songs": "spotify:collection:tracks",
+    "discover weekly": "spotify:playlist:37i9dQZEVXcQ"
+  },
+  "music": {
+    "service": "spotify",
+    "default_playlist": "liked songs"
+  },
   "folders": {
     "downloads": "%USERPROFILE%\\Downloads",
     "desktop": "%USERPROFILE%\\Desktop",
