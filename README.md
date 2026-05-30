@@ -42,7 +42,7 @@ When they launch the exe, JARVIS creates a fresh local `config.json` next to the
 
 ## Run From Source
 
-Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/windows/) and enable **Add python.exe to PATH**.
+Install Python 3.10.x -3.13.x dont install 3.14.x cause speach recognition wont work from [python.org](https://www.python.org/downloads/windows/) and enable **Add python.exe to PATH**.
 
 ```powershell
 py -m pip install -r requirements.txt
