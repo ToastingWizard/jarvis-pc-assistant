@@ -59,6 +59,11 @@ DEFAULT_CONFIG = {
         "phrase_threshold": 0.45,
         "log_unrecognized": False,
         "auto_start": True,
+        "tts_engine": "edge_tts",
+        "edge_voice": "en-GB-RyanNeural",
+        "edge_rate": "-4%",
+        "edge_volume": "+0%",
+        "pyttsx3_rate": 175,
     },
     "conversation": {
         "enabled": True,
@@ -116,7 +121,7 @@ class JarvisEngine:
     def load_config(self):
         if not self.config_path.exists():
             self.save_config(DEFAULT_CONFIG)
-        with self.config_path.open("r", encoding="utf-8") as file:
+        with self.config_path.open("r", encoding="utf-8-sig") as file:
             config = json.load(file)
         migrated, changed = self.migrate_config(config)
         if changed:
@@ -164,22 +169,85 @@ class JarvisEngine:
         if self.config.get("voice", {}).get("speak_responses", True):
             def _speak():
                 try:
-                    import pyttsx3
-                    # Initialize inside thread to avoid COM issues on Windows
                     self._is_speaking = True
-                    engine = pyttsx3.init()
-                    engine.say(text)
-                    engine.runAndWait()
+                    voice_config = self.config.get("voice", {})
+                    if voice_config.get("tts_engine", "pyttsx3") == "edge_tts":
+                        self.speak_with_edge_tts(text, voice_config)
+                    else:
+                        self.speak_with_pyttsx3(text, voice_config)
                     self._is_speaking = False
                     self._speech_cooldown_until = time.time() + 1.25
                 except Exception as e:
                     self.log(f"TTS Error: {e}")
+                    try:
+                        self.speak_with_pyttsx3(text, self.config.get("voice", {}))
+                    except Exception as fallback_error:
+                        self.log(f"TTS fallback error: {fallback_error}")
                     self._is_speaking = False
                     self._speech_cooldown_until = time.time() + 0.75
             threading.Thread(target=_speak, daemon=True).start()
 
     def is_audio_output_active(self):
         return self._is_speaking or time.time() < self._speech_cooldown_until
+
+    def speak_with_pyttsx3(self, text, voice_config):
+        import pyttsx3
+        # Initialize inside thread to avoid COM issues on Windows
+        engine = pyttsx3.init()
+        rate = voice_config.get("pyttsx3_rate")
+        if rate:
+            engine.setProperty("rate", int(rate))
+        engine.say(text)
+        engine.runAndWait()
+
+    def speak_with_edge_tts(self, text, voice_config):
+        import asyncio
+        import ctypes
+        import tempfile
+        import uuid
+
+        import edge_tts
+
+        async def _save_audio(path):
+            communicate = edge_tts.Communicate(
+                text,
+                voice_config.get("edge_voice", "en-GB-RyanNeural"),
+                rate=voice_config.get("edge_rate", "-4%"),
+                volume=voice_config.get("edge_volume", "+0%"),
+            )
+            await communicate.save(path)
+
+        temp_path = os.path.join(tempfile.gettempdir(), f"jarvis_tts_{uuid.uuid4().hex}.mp3")
+        alias = f"jarvis_tts_{uuid.uuid4().hex}"
+        try:
+            asyncio.run(_save_audio(temp_path))
+            self.play_audio_file(temp_path, alias)
+        finally:
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+
+    def play_audio_file(self, path, alias):
+        import ctypes
+
+        winmm = ctypes.windll.winmm
+
+        def mci(command):
+            buffer = ctypes.create_unicode_buffer(255)
+            result = winmm.mciSendStringW(command, buffer, 254, 0)
+            if result != 0:
+                raise RuntimeError(f"MCI audio command failed: {command}")
+            return buffer.value
+
+        mci(f'open "{path}" type mpegvideo alias {alias}')
+        try:
+            mci(f"play {alias} wait")
+        finally:
+            try:
+                mci(f"close {alias}")
+            except Exception:
+                pass
 
     def run_command(self, raw_command):
         command = self.strip_wake_phrase(raw_command)
@@ -218,6 +286,10 @@ class JarvisEngine:
                 return self.run_mode(target)
             if action == "close":
                 return self.close_app(target)
+            if action == "open":
+                targets = self.split_multi_targets(target)
+                if len(targets) > 1:
+                    return self.open_multiple_targets(targets)
             return self.open_target(target)
         
         # Fallback to best target match
@@ -232,7 +304,7 @@ class JarvisEngine:
 
     def normalize(self, text):
         text = text.strip().lower()
-        text = re.sub(r"[^a-z0-9:/?.&%+\-\\ ]+", " ", text)
+        text = re.sub(r"[^a-z0-9:/?.&%+,\-\\ ]+", " ", text)
         return text.strip()
 
     def strip_wake_phrase(self, text):
@@ -241,14 +313,14 @@ class JarvisEngine:
         command = self.repair_wake_mishear(command)
         # Exact strip
         if command.startswith(wake):
-            return command[len(wake):].strip()
+            return self.repair_command_mishear(command[len(wake):].strip())
         # Try stripping first 1-2 words if they look like the wake phrase
         words = command.split()
         for n in (2, 1):
             prefix = " ".join(words[:n])
             if difflib.SequenceMatcher(None, prefix, wake).ratio() > 0.6:
-                return " ".join(words[n:]).strip()
-        return command
+                return self.repair_command_mishear(" ".join(words[n:]).strip())
+        return self.repair_command_mishear(command)
 
     def repair_wake_mishear(self, command):
         wake = self.normalize(self.config.get("wake_phrase", "hey jarvis"))
@@ -269,6 +341,12 @@ class JarvisEngine:
             prefix = " ".join(words[:n])
             if prefix and difflib.SequenceMatcher(None, prefix, wake).ratio() > 0.55:
                 return f"hey jarvis {' '.join(words[n:])}".strip()
+        return command
+
+    def repair_command_mishear(self, command):
+        command = self.normalize(command)
+        command = re.sub(r"\b(shut\s*down|shutdown|exit|quit|close|power off|turn off|goodbye|bye)\s+jar\b", r"\1 jarvis", command)
+        command = re.sub(r"\b(start|load|wake up|stop|close|kill)\s+(ola|olama|llama)\b", r"\1 ollama", command)
         return command
 
     def extract_action_target(self, command):
@@ -301,6 +379,27 @@ class JarvisEngine:
             return "mode", command
 
         return None
+
+    def is_known_target_name(self, name):
+        name = self.normalize(name)
+        for kind in ("modes", "apps", "websites", "playlists", "folders"):
+            if name in self.config.get(kind, {}):
+                return True
+        return False
+
+    def split_multi_targets(self, target):
+        target = self.normalize(target)
+        if not target or self.is_known_target_name(target):
+            return [target] if target else []
+
+        parts = [
+            part.strip()
+            for part in re.split(r"\s*(?:,|\band\b|\bplus\b|\bwith\b)\s*", target)
+            if part.strip()
+        ]
+        if len(parts) < 2:
+            return [target]
+        return parts
 
     def best_target(self, command):
         command = self.normalize(command)
@@ -403,25 +502,51 @@ class JarvisEngine:
         except Exception:
             webbrowser.open(url)
 
-    def open_target(self, name):
+    def open_multiple_targets(self, names):
+        names = [self.normalize(name) for name in names if self.normalize(name)]
+        if not names:
+            return ActionResult(False, "No targets")
+
+        if len(names) == 2:
+            spoken = f"{names[0]} and {names[1]}"
+        else:
+            spoken = f"{', '.join(names[:-1])}, and {names[-1]}"
+        self.respond(f"Opening {spoken}, sir.")
+
+        failures = []
+        for name in names:
+            result = self.open_target(name, announce=False)
+            if not result.ok:
+                failures.append(name)
+            time.sleep(0.35)
+
+        if failures:
+            self.respond(f"I could not find {', '.join(failures)}, sir.")
+            return ActionResult(False, f"Missing: {', '.join(failures)}")
+        return ActionResult(True, f"Opened {spoken}")
+
+    def open_target(self, name, announce=True):
         name = self.normalize(name)
 
         # Prefer apps over websites when names overlap, e.g. Spotify.
         app = self.config.get("apps", {}).get(name)
         if app:
             target = app.get("target")
-            self.respond(f"Opening {name}, sir.")
+            if announce:
+                self.respond(f"Opening {name}, sir.")
             return self.launch(target)
 
         site = self.config.get("websites", {}).get(name)
         if site:
-            self.respond(f"Opening {name} in your browser, sir.")
+            if announce:
+                self.respond(f"Opening {name} in your browser, sir.")
             self.open_url(site)
             return ActionResult(True, site)
 
         playlist = self.config.get("playlists", {}).get(name)
         if playlist:
-            self.respond(f"Playing {name}, sir.")
+            if announce:
+                self.respond(f"Playing {name}, sir.")
             self.open_url(playlist)
             return ActionResult(True, playlist)
 
@@ -429,10 +554,12 @@ class JarvisEngine:
         folder = self.config.get("folders", {}).get(name)
         if folder:
             expanded = os.path.expandvars(folder)
-            self.respond(f"Opening your {name} folder, sir.")
+            if announce:
+                self.respond(f"Opening your {name} folder, sir.")
             return self.launch(expanded)
 
-        self.respond(f"I couldn't find {name}, sir. Try adding it in the sidebar.")
+        if announce:
+            self.respond(f"I couldn't find {name}, sir. Try adding it in the sidebar.")
         return ActionResult(False, "Not found")
 
     def launch(self, target):
@@ -465,6 +592,7 @@ class JarvisEngine:
             "obs studio": ["obs64.exe", "obs.exe"], "steam": ["steam.exe"],
             "epic games": ["epicgameslauncher.exe"], "valorant": ["valorant.exe", "vanguard.exe"],
             "spotify": ["spotify.exe"], "zoom": ["zoom.exe"],
+            "codex": ["codex.exe", "Codex.exe"], "openai codex": ["codex.exe", "Codex.exe"],
             "roblox": ["robloxplayerbeta.exe"], "pycharm": ["pycharm64.exe"],
             "notepad": ["notepad.exe"], "calculator": ["calculatorapp.exe", "calc.exe"],
             "task manager": ["taskmgr.exe"], "davinci resolve": ["resolve.exe"],
@@ -574,6 +702,21 @@ class JarvisEngine:
         if ("date" in norm or "what day" in norm) and any(p in norm for p in ("what", "today", "is it")):
             return self.respond(f"Today is {now.strftime('%A, %B %d, %Y')}, {title}.")
 
+        if any(p in norm for p in ("how are you", "you good", "you okay", "you alright")):
+            return self.respond(random.choice([f"Running clean, {title}. No complaints.", f"Operational and mildly entertained, {title}.", f"Perfectly calibrated, {title}."]))
+        if any(p in norm for p in ("hello", "hi", "hey", "wassup", "sup", "yo")):
+            return self.respond(random.choice([f"Hey {title}. What do you need?", f"Here and ready, {title}. What's the move?"]))
+        if any(p in norm for p in ("thank you", "thanks", "good job", "cheers")):
+            return self.respond(random.choice([f"Just doing my job, {title}.", f"Anytime, {title}.", f"Try not to make a habit of thanking the AI, {title}."]))
+        if any(p in norm for p in ("good morning", "morning")):
+            return self.respond(random.choice([f"Good morning, {title}.", f"Morning, {title}. What are we getting into?"]))
+        if any(p in norm for p in ("good night", "night", "going to sleep")):
+            return self.respond(random.choice([f"Rest well, {title}.", f"Goodnight, {title}."]))
+        if any(p in norm for p in ("who are you", "what are you", "your name")):
+            return self.respond(f"I am JARVIS - your personal PC assistant, {title}.")
+        if any(p in norm for p in ("what can you do", "help", "commands")):
+            return self.respond(f"I can open apps, websites, folders, play music, and run your custom modes, {title}. Try 'open Codex', 'play music', or 'study mode'.")
+
         # Try OpenRouter API for everything else
         # Try Gemini API if key is set
         gemini_key = self.config.get("gemini_api_key", "").strip()
@@ -583,9 +726,11 @@ class JarvisEngine:
                 system_prompt = (
                     f"You are JARVIS, a sharp, witty, loyal personal AI assistant running on a Windows PC. "
                     f"Personality: {style}. Address the user as '{title}'. "
-                    f"You have knowledge of gaming, tech, streaming, and current trends. "
+                    f"You have knowledge of gaming, tech, and current trends. "
                     f"Be conversational, confident, never sycophantic. "
-                    f"Keep responses to 2-4 sentences unless more detail is genuinely needed."
+                    f"Keep responses to 1-3 sentences unless more detail is genuinely needed. "
+                    f"Answer only the user's latest message. Do not invent extra User questions. "
+                    f"Do not write labels like User:, JARVIS:, Assistant:, or transcript examples."
                 )
 
                 # Try Ollama first (local, no internet needed)
@@ -593,6 +738,7 @@ class JarvisEngine:
                     payload = _json.dumps({
                         "model": "phi3:mini",
                         "prompt": f"{system_prompt}\n\nUser: {text}\nJARVIS:",
+                        "options": {"stop": ["\nUser:", "\nJARVIS:", "\nAssistant:", "User:", "JARVIS:", "Assistant:"]},
                         "stream": False
                     }).encode("utf-8")
                     req = _req.Request(
@@ -603,7 +749,7 @@ class JarvisEngine:
                     )
                     with _req.urlopen(req, timeout=120) as resp:
                         data = _json.loads(resp.read().decode("utf-8"))
-                        reply = data["response"].strip()
+                        reply = self.clean_ai_reply(data["response"])
                         self.respond(reply)
                         return
                 except Exception as e:
@@ -620,7 +766,7 @@ class JarvisEngine:
                         req = _req.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
                         with _req.urlopen(req, timeout=15) as resp:
                             data = _json.loads(resp.read().decode("utf-8"))
-                            reply = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                            reply = self.clean_ai_reply(data["candidates"][0]["content"]["parts"][0]["text"])
                             self.respond(reply)
                             return
                     except Exception as e:
@@ -656,6 +802,16 @@ class JarvisEngine:
             f"Not sure what to do with that one, {title}. Give me an app, a mode, or a search.",
         ]))
         return ActionResult(True, "chat")
+
+    def clean_ai_reply(self, reply):
+        reply = str(reply or "").strip()
+        for marker in ("\nUser:", "\nJARVIS:", "\nAssistant:", "\nHuman:", "\nAI:"):
+            if marker in reply:
+                reply = reply.split(marker, 1)[0].strip()
+        for prefix in ("JARVIS:", "Assistant:", "AI:", "User:", "Human:"):
+            if reply.startswith(prefix):
+                reply = reply[len(prefix):].strip()
+        return reply or "I am here, sir."
 
     def was_addressed_to_jarvis(self, text):
         norm = self.repair_wake_mishear(self.normalize(text))
@@ -1050,11 +1206,10 @@ class JarvisUI:
                         if addressed or self.conversation_active or actionable:
                             self.conversation_active = True
                             self.last_interaction_time = time.time()
-                            norm = text.lower()
-                            if any(p in norm for p in ("shut down jarvis", "shutdown jarvis", "exit jarvis", "quit jarvis", "shut down", "power off", "turn off jarvis", "goodbye jarvis", "bye jarvis")):
+                            if self.is_shutdown_request(text):
                                 self.engine.respond("Shutting down. Goodbye, sir.")
                                 self.root.after(3500, self.shutdown)
-                            elif any(p in norm for p in ("show jarvis", "open jarvis", "bring up jarvis", "show yourself", "come back", "jarvis show", "jarvis open", "wake up jarvis")):
+                            elif self.is_show_request(text):
                                 self.root.after(0, lambda: (self.root.deiconify(), self.root.lift(), self.root.focus_force()))
                             else:
                                 self.root.after(0, lambda t=text: self.engine.run_command(t))
@@ -1120,17 +1275,45 @@ class JarvisUI:
         self.output.see(END)
         self.output.configure(state="disabled")
 
+    def is_shutdown_request(self, text):
+        norm = self.engine.normalize(text)
+        command = self.engine.strip_wake_phrase(norm)
+        shutdown_phrases = {
+            "shut down jarvis", "shutdown jarvis", "exit jarvis", "quit jarvis",
+            "close jarvis", "power off jarvis", "turn off jarvis",
+            "goodbye jarvis", "bye jarvis",
+        }
+        shutdown_commands = {
+            "shut down", "shutdown", "exit", "quit", "close",
+            "power off", "turn off", "goodbye", "bye",
+            "shut down jarvis", "shutdown jarvis", "exit jarvis", "quit jarvis",
+            "close jarvis", "power off jarvis", "turn off jarvis",
+            "goodbye jarvis", "bye jarvis",
+        }
+        return norm in shutdown_phrases or command in shutdown_commands
+
+    def is_show_request(self, text):
+        norm = self.engine.normalize(text)
+        command = self.engine.strip_wake_phrase(norm)
+        show_phrases = {
+            "show jarvis", "open jarvis", "bring up jarvis", "show yourself",
+            "come back", "jarvis show", "jarvis open", "wake up jarvis",
+        }
+        show_commands = {
+            "show yourself", "show", "come back", "wake up",
+        }
+        return norm in show_phrases or command in show_commands
+
     def send_command(self):
         cmd = self.command_text.get().strip()
         if not cmd:
             return
         self.command_text.set("")
-        norm = cmd.lower().strip()
-        if any(p in norm for p in ("shut down jarvis", "shutdown jarvis", "exit jarvis", "quit jarvis", "close jarvis", "shut down", "power off", "turn off jarvis", "goodbye jarvis", "bye jarvis")):
+        if self.is_shutdown_request(cmd):
             self.engine.respond(f"Shutting down. Goodbye, sir.")
             self.root.after(3500, self.shutdown)
             return
-        if any(p in norm for p in ("show jarvis", "open jarvis", "bring up jarvis", "show yourself", "come back", "jarvis show", "wake up jarvis")):
+        if self.is_show_request(cmd):
             self.root.deiconify()
             self.root.lift()
             self.root.focus_force()

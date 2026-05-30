@@ -12,7 +12,12 @@
     "pause_threshold": 0.9,
     "phrase_threshold": 0.45,
     "log_unrecognized": false,
-    "auto_start": true
+    "auto_start": true,
+    "tts_engine": "edge_tts",
+    "edge_voice": "en-GB-RyanNeural",
+    "edge_rate": "-4%",
+    "edge_volume": "+0%",
+    "pyttsx3_rate": 175
   },
   "conversation": {
     "enabled": true,
