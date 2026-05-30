@@ -28,7 +28,7 @@ ollama pull phi3:mini
 - Minimize-to-tray support
 - One-file Windows `.exe` build with PyInstaller
 
-## Download For Friends
+## Installation Guide
 
 The easiest way to share JARVIS is through GitHub Releases:
 
