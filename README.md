@@ -45,8 +45,8 @@ When they launch the exe, JARVIS creates a fresh local `config.json` next to the
 Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/windows/) and enable **Add python.exe to PATH**.
 
 ```powershell
-python -m pip install -r requirements.txt
-python JARVIS_app.py
+py -m pip install -r requirements.txt
+py JARVIS_app.py
 ```
 
 Or double-click:
