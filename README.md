@@ -184,10 +184,3 @@ Modes are routines made of apps, websites, playlists, folders, and delays:
 
 You can create modes directly in the JARVIS UI.
 
-## GitHub Safety Checklist
-
-- Keep `config.json` private.
-- Do not commit `dist/` or `build/`.
-- Do not commit API keys.
-- Tell friends Windows may show a SmartScreen warning because the exe is not code-signed.
-- Friends should customize their own microphone and app paths inside JARVIS.
