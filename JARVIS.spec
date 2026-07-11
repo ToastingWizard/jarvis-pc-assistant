@@ -1,12 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import sys
+
+block_cipher = None
+icon_file = ['JARVIS.ico'] if sys.platform.startswith('win') else None
+data_files = [('JARVIS.ico', '.')] if sys.platform.startswith('win') else []
 
 a = Analysis(
     ['JARVIS_app.py'],
     pathex=[],
     binaries=[],
-    datas=[('JARVIS.ico', '.')],
-    hiddenimports=[],
+    datas=data_files,
+    hiddenimports=['jarvis_reviewer'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -35,5 +40,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['JARVIS.ico'],
+    icon=icon_file,
 )

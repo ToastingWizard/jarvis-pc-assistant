@@ -5,6 +5,7 @@ import difflib
 import random
 import re
 import shutil
+import shlex
 import subprocess
 import threading
 import time
@@ -101,6 +102,19 @@ DEFAULT_CONFIG = {
             {"type": "website", "name": "netflix"},
         ],
     },
+    "projects": {
+        "jarvis": ".",
+    },
+    "reviewer": {
+        "default_project": "jarvis",
+        "editor": "pycharm",
+        "pycharm_exe": "",
+        "allow_push": False,
+        "use_ai": True,
+        "merge_rule_findings": True,
+        "max_diff_chars": 60000,
+        "ollama_model": "phi3:mini",
+    },
 }
 
 @dataclass
@@ -117,6 +131,26 @@ class JarvisEngine:
         self._is_speaking = False
         self._speech_cooldown_until = 0
         self._tts_engine = None
+        self.last_review = None
+
+    def is_windows(self):
+        return os.name == "nt"
+
+    def quiet_subprocess_kwargs(self):
+        if self.is_windows() and hasattr(subprocess, "CREATE_NO_WINDOW"):
+            return {"creationflags": subprocess.CREATE_NO_WINDOW}
+        return {}
+
+    def open_system_target(self, target):
+        target = str(target)
+        if self.is_windows():
+            os.startfile(target)
+            return
+        opener = "open" if sys.platform == "darwin" else "xdg-open"
+        if shutil.which(opener):
+            subprocess.Popen([opener, target], **self.quiet_subprocess_kwargs())
+            return
+        webbrowser.open(target)
 
     def load_config(self):
         if not self.config_path.exists():
@@ -202,7 +236,6 @@ class JarvisEngine:
 
     def speak_with_edge_tts(self, text, voice_config):
         import asyncio
-        import ctypes
         import tempfile
         import uuid
 
@@ -229,8 +262,21 @@ class JarvisEngine:
                 pass
 
     def play_audio_file(self, path, alias):
-        import ctypes
+        if not self.is_windows():
+            players = (
+                ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", path],
+                ["mpg123", "-q", path],
+                ["mpv", "--no-video", "--really-quiet", path],
+                ["cvlc", "--play-and-exit", "--quiet", path],
+            )
+            for command in players:
+                if shutil.which(command[0]):
+                    subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return
+            self.open_system_target(path)
+            return
 
+        import ctypes
         winmm = ctypes.windll.winmm
 
         def mci(command):
@@ -264,18 +310,31 @@ class JarvisEngine:
 
         if any(p in command for p in ("start ollama", "load ollama", "wake up ollama")):
             def _start():
-                NO_WINDOW = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0x08000000
-                subprocess.Popen(["ollama", "serve"], creationflags=NO_WINDOW)
+                subprocess.Popen(["ollama", "serve"], **self.quiet_subprocess_kwargs())
                 time.sleep(2)
                 self.respond(f"Ollama is running, {title}. AI is online.")
             threading.Thread(target=_start, daemon=True).start()
             return ActionResult(True, "ollama started")
 
         if any(p in command for p in ("stop ollama", "close ollama", "kill ollama")):
-            NO_WINDOW = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0x08000000
-            subprocess.run(["taskkill", "/f", "/im", "ollama.exe"], creationflags=NO_WINDOW, capture_output=True)
+            if self.is_windows():
+                subprocess.run(["taskkill", "/f", "/im", "ollama.exe"], capture_output=True, **self.quiet_subprocess_kwargs())
+            else:
+                subprocess.run(["pkill", "-f", "ollama"], capture_output=True)
             self.respond(f"Ollama stopped, {title}. VRAM is free for gaming.")
             return ActionResult(True, "ollama stopped")
+
+        review_action = self.extract_review_action(command)
+        if review_action:
+            kind, target = review_action
+            if kind == "review":
+                return self.review_project(target)
+            if kind == "open_issue":
+                return self.open_review_issue(target)
+            if kind == "fix_issue":
+                return self.apply_review_fix(target)
+            if kind == "push":
+                return self.push_project(target)
 
         action_target = self.extract_action_target(command)
         if action_target:
@@ -490,7 +549,7 @@ class JarvisEngine:
         web_url = f"https://open.spotify.com/search/{encoded}"
         self.respond(f"Looking for {query} on Spotify, sir.")
         try:
-            os.startfile(spotify_uri)
+            self.open_system_target(spotify_uri)
             return ActionResult(True, spotify_uri)
         except Exception:
             self.open_url(web_url)
@@ -498,7 +557,7 @@ class JarvisEngine:
 
     def open_url(self, url):
         try:
-            os.startfile(url)
+            self.open_system_target(url)
         except Exception:
             webbrowser.open(url)
 
@@ -563,20 +622,26 @@ class JarvisEngine:
         return ActionResult(False, "Not found")
 
     def launch(self, target):
-        NO_WINDOW = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0x08000000
+        target = os.path.expandvars(os.path.expanduser(str(target)))
         try:
-            os.startfile(target)
+            if self.is_windows():
+                os.startfile(target)
+            elif os.path.exists(target) or re.match(r"^[a-z]+://", target, re.IGNORECASE):
+                self.open_system_target(target)
+            else:
+                subprocess.Popen(shlex.split(target), **self.quiet_subprocess_kwargs())
             return ActionResult(True, target)
         except Exception:
             try:
-                import ctypes
-                ret = ctypes.windll.shell32.ShellExecuteW(None, "open", target, None, None, 1)
-                if ret > 32:
-                    return ActionResult(True, target)
+                if self.is_windows():
+                    import ctypes
+                    ret = ctypes.windll.shell32.ShellExecuteW(None, "open", target, None, None, 1)
+                    if ret > 32:
+                        return ActionResult(True, target)
             except Exception:
                 pass
             try:
-                subprocess.Popen(target, shell=False, creationflags=NO_WINDOW)
+                subprocess.Popen(target, shell=True, **self.quiet_subprocess_kwargs())
                 return ActionResult(True, target)
             except Exception as e2:
                 self.log(f"Launch error: {e2}")
@@ -585,36 +650,22 @@ class JarvisEngine:
     def close_app(self, name):
         title = self.config.get("conversation", {}).get("user_title", "sir")
         name = self.normalize(name)
-        process_map = {
-            "chrome": ["chrome.exe"], "google chrome": ["chrome.exe"],
-            "opera gx": ["opera.exe"], "edge": ["msedge.exe"],
-            "discord": ["discord.exe"], "obs": ["obs64.exe", "obs.exe"],
-            "obs studio": ["obs64.exe", "obs.exe"], "steam": ["steam.exe"],
-            "epic games": ["epicgameslauncher.exe"], "valorant": ["valorant.exe", "vanguard.exe"],
-            "spotify": ["spotify.exe"], "zoom": ["zoom.exe"],
-            "codex": ["codex.exe", "Codex.exe"], "openai codex": ["codex.exe", "Codex.exe"],
-            "roblox": ["robloxplayerbeta.exe"], "pycharm": ["pycharm64.exe"],
-            "notepad": ["notepad.exe"], "calculator": ["calculatorapp.exe", "calc.exe"],
-            "task manager": ["taskmgr.exe"], "davinci resolve": ["resolve.exe"],
-            "resolve": ["resolve.exe"], "medal": ["medal.exe"],
-            "word": ["winword.exe"], "excel": ["excel.exe"],
-            "powerpoint": ["powerpnt.exe"], "onenote": ["onenote.exe"],
-            "vpn": ["privadovpn.exe"], "privado vpn": ["privadovpn.exe"],
-            "nvidia app": ["nvclient.exe"], "rainmeter": ["rainmeter.exe"],
-        }
+        process_map = self.process_name_map()
         # Browsers and apps that need graceful close (no /f flag)
         graceful = {"chrome.exe", "msedge.exe", "opera.exe", "firefox.exe"}
-        processes = process_map.get(name, [f"{name.replace(' ', '')}.exe", f"{name}.exe"])
-        NO_WINDOW = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0x08000000
+        processes = process_map.get(name, [f"{name.replace(' ', '')}.exe", f"{name}.exe"] if self.is_windows() else [name.replace(" ", ""), name])
         killed = False
         for proc in processes:
             try:
-                # Use graceful close for browsers, force kill for everything else
-                flags = [] if proc in graceful else ["/f"]
-                result = subprocess.run(
-                    ["taskkill"] + flags + ["/im", proc],
-                    capture_output=True, text=True, creationflags=NO_WINDOW
-                )
+                if self.is_windows():
+                    # Use graceful close for browsers, force kill for everything else
+                    flags = [] if proc in graceful else ["/f"]
+                    result = subprocess.run(
+                        ["taskkill"] + flags + ["/im", proc],
+                        capture_output=True, text=True, **self.quiet_subprocess_kwargs()
+                    )
+                else:
+                    result = subprocess.run(["pkill", "-f", proc], capture_output=True, text=True)
                 if result.returncode == 0:
                     killed = True
                     break
@@ -633,6 +684,40 @@ class JarvisEngine:
                 f"{name.title()} does not appear to be open, {title}.",
             ]))
             return ActionResult(False, f"Not running: {name}")
+
+    def process_name_map(self):
+        if self.is_windows():
+            return {
+                "chrome": ["chrome.exe"], "google chrome": ["chrome.exe"],
+                "opera gx": ["opera.exe"], "edge": ["msedge.exe"],
+                "discord": ["discord.exe"], "obs": ["obs64.exe", "obs.exe"],
+                "obs studio": ["obs64.exe", "obs.exe"], "steam": ["steam.exe"],
+                "epic games": ["epicgameslauncher.exe"], "valorant": ["valorant.exe", "vanguard.exe"],
+                "spotify": ["spotify.exe"], "zoom": ["zoom.exe"],
+                "codex": ["codex.exe", "Codex.exe"], "openai codex": ["codex.exe", "Codex.exe"],
+                "roblox": ["robloxplayerbeta.exe"], "pycharm": ["pycharm64.exe"],
+                "notepad": ["notepad.exe"], "calculator": ["calculatorapp.exe", "calc.exe"],
+                "task manager": ["taskmgr.exe"], "davinci resolve": ["resolve.exe"],
+                "resolve": ["resolve.exe"], "medal": ["medal.exe"],
+                "word": ["winword.exe"], "excel": ["excel.exe"],
+                "powerpoint": ["powerpnt.exe"], "onenote": ["onenote.exe"],
+                "vpn": ["privadovpn.exe"], "privado vpn": ["privadovpn.exe"],
+                "nvidia app": ["nvclient.exe"], "rainmeter": ["rainmeter.exe"],
+            }
+        return {
+            "chrome": ["chrome", "google-chrome", "google-chrome-stable"],
+            "google chrome": ["chrome", "google-chrome", "google-chrome-stable"],
+            "edge": ["microsoft-edge", "msedge"],
+            "firefox": ["firefox"],
+            "spotify": ["spotify"],
+            "steam": ["steam"],
+            "obs": ["obs", "obs-studio"],
+            "obs studio": ["obs", "obs-studio"],
+            "discord": ["discord"],
+            "pycharm": ["pycharm", "pycharm.sh"],
+            "codex": ["codex"],
+            "openai codex": ["codex"],
+        }
 
     def run_mode(self, mode_name):
         title = self.config.get("conversation", {}).get("user_title", "sir")
@@ -829,6 +914,308 @@ class JarvisEngine:
         if "jarvis" in norm:
             return True
         return False
+
+    def extract_review_action(self, command):
+        command = self.normalize(command)
+        ordinal_map = {
+            "first": 1, "one": 1, "1": 1,
+            "second": 2, "two": 2, "2": 2,
+            "third": 3, "three": 3, "3": 3,
+            "fourth": 4, "four": 4, "4": 4,
+            "fifth": 5, "five": 5, "5": 5,
+        }
+
+        if any(command.startswith(p) for p in ("review", "check code", "scan code", "inspect code")):
+            target = command
+            for prefix in ("review my changes", "review code", "review project", "review", "check code", "scan code", "inspect code"):
+                if target.startswith(prefix):
+                    target = target[len(prefix):].strip()
+                    break
+            return "review", target or None
+
+        if re.match(r"^(open|show)\s+(.+\s+)?issue\b", command):
+            return "open_issue", self.extract_issue_number(command, ordinal_map)
+
+        if re.match(r"^(fix|apply)\s+(.+\s+)?(issue|fix)\b", command):
+            return "fix_issue", self.extract_issue_number(command, ordinal_map)
+
+        if command in ("push", "push code", "push to github", "push project") or command.startswith("push "):
+            target = command
+            for prefix in ("push to github", "push project", "push code", "push"):
+                if target.startswith(prefix):
+                    target = target[len(prefix):].strip()
+                    break
+            return "push", target or None
+
+        return None
+
+    def extract_issue_number(self, command, ordinal_map):
+        for word, number in ordinal_map.items():
+            if re.search(rf"\b{re.escape(word)}\b", command):
+                return number
+        match = re.search(r"\bissue\s+(\d+)\b|\bfix\s+(\d+)\b", command)
+        if match:
+            return int(next(group for group in match.groups() if group))
+        return 1
+
+    def resolve_project(self, target=None):
+        projects = self.config.get("projects", {})
+        reviewer = self.config.get("reviewer", {})
+        key = self.normalize(target or "") or reviewer.get("default_project") or "jarvis"
+        if key in projects:
+            raw_path = projects[key]
+        elif target and Path(os.path.expandvars(os.path.expanduser(target))).exists():
+            raw_path = target
+            key = Path(raw_path).name
+        else:
+            raw_path = projects.get(reviewer.get("default_project", "jarvis"), ".")
+            key = reviewer.get("default_project", "jarvis")
+        path = Path(os.path.expandvars(os.path.expanduser(str(raw_path))))
+        if not path.is_absolute():
+            path = (APP_DIR / path).resolve()
+        return key, path
+
+    def run_git(self, project_path, args):
+        return subprocess.run(
+            ["git"] + list(args),
+            cwd=str(project_path),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            **self.quiet_subprocess_kwargs(),
+        )
+
+    def review_project(self, target=None):
+        title = self.config.get("conversation", {}).get("user_title", "sir")
+        key, project_path = self.resolve_project(target)
+        if not project_path.exists():
+            self.respond(f"I cannot find the {key} project, {title}.")
+            return ActionResult(False, "Project not found")
+
+        try:
+            from jarvis_reviewer import changed_files_from_status, get_local_diff, query_ai_structured
+        except Exception as error:
+            self.respond(f"The reviewer module is not available, {title}.")
+            self.log(f"Reviewer import error: {error}")
+            return ActionResult(False, str(error))
+
+        status_text, diff_text = get_local_diff(self.run_git, project_path)
+        changed_files = changed_files_from_status(status_text)
+        if not changed_files:
+            self.last_review = {"project": key, "path": str(project_path), "findings": []}
+            self.respond(f"I reviewed {key}. No local changes found, {title}.")
+            return ActionResult(True, "No changes")
+
+        findings = []
+        rule_findings = self.build_review_findings(project_path, status_text, diff_text)
+        if self.config.get("reviewer", {}).get("use_ai", True) and diff_text.strip():
+            try:
+                ai_issues = query_ai_structured(self.config, diff_text, changed_files, self.log)
+                findings.extend(issue.to_display_dict() for issue in ai_issues)
+            except Exception as error:
+                self.log(f"AI review unavailable: {error}")
+        if self.config.get("reviewer", {}).get("merge_rule_findings", True):
+            seen = {(f.get("file"), f.get("line"), f.get("message", "")[:50]) for f in findings}
+            for item in rule_findings:
+                key_tuple = (item.get("file"), item.get("line"), item.get("message", "")[:50])
+                if key_tuple not in seen:
+                    findings.append(item)
+                    seen.add(key_tuple)
+
+        severity_order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+        findings.sort(key=lambda item: severity_order.get(str(item.get("severity", "LOW")).upper(), 2))
+        self.last_review = {
+            "project": key,
+            "path": str(project_path),
+            "findings": findings,
+            "changed_files": changed_files,
+            "status": status_text,
+        }
+
+        self.log(f"Review: {key} ({len(changed_files)} changed file(s))")
+        if findings:
+            for index, finding in enumerate(findings[:10], start=1):
+                auto = " [auto-fix available]" if finding.get("auto_fix") else ""
+                self.log(
+                    f"{index}. {finding.get('severity', 'LOW')} {finding.get('file')}:{finding.get('line')} "
+                    f"- {finding.get('message')}{auto}"
+                )
+                if finding.get("fix"):
+                    self.log(f"   Fix: {finding.get('fix')}")
+            self.respond(f"I found {len(findings)} thing{'s' if len(findings) != 1 else ''} in {key}, {title}. Say 'open first issue' or 'fix first issue'.")
+        else:
+            self.respond(f"I reviewed {key}. No obvious issues in the local changes, {title}.")
+        return ActionResult(True, "Reviewed")
+
+    def build_review_findings(self, project_path, status_text, diff_text):
+        findings = []
+        changed = {}
+        current_file = None
+        current_line = 0
+        for line in diff_text.splitlines():
+            if line.startswith("+++ b/"):
+                current_file = line[6:].strip()
+                changed.setdefault(current_file, [])
+            elif line.startswith("@@"):
+                match = re.search(r"\+(\d+)", line)
+                current_line = int(match.group(1)) - 1 if match else 0
+            elif current_file and line.startswith("+") and not line.startswith("+++"):
+                current_line += 1
+                changed[current_file].append((current_line, line[1:]))
+            elif current_file and not line.startswith("-"):
+                current_line += 1
+
+        for line in status_text.splitlines():
+            if not line.strip():
+                continue
+            rel = line[3:].strip().replace("\\", "/")
+            if " -> " in rel:
+                rel = rel.split(" -> ", 1)[1].strip()
+            root = rel.split("/", 1)[0]
+            if root in {"build", "dist", "voice_samples", "__pycache__"} or rel.endswith((".pyc", ".pyo", ".log")):
+                pattern = f"{root}/" if "/" in rel else rel
+                if root in {"build", "dist", "voice_samples", "__pycache__"}:
+                    pattern = f"{root}/"
+                findings.append({
+                    "file": rel,
+                    "line": 1,
+                    "severity": "LOW",
+                    "message": "Generated or local artifact is showing up in git changes.",
+                    "fix": f"Add {pattern} to .gitignore instead of committing local artifacts.",
+                    "auto_fix": "gitignore",
+                    "ignore_pattern": pattern,
+                })
+
+        secret_re = re.compile(r"(api[_-]?key|token|secret|password)\s*[:=]\s*['\"][^'\"]{8,}", re.IGNORECASE)
+        for file_path, additions in changed.items():
+            for line_number, added in additions:
+                lower = added.lower()
+                if secret_re.search(added):
+                    findings.append({
+                        "file": file_path,
+                        "line": line_number,
+                        "severity": "HIGH",
+                        "message": "Possible secret or API key added to source control.",
+                        "fix": "Move the secret into config.json or an environment variable, then rotate it if it was real.",
+                    })
+                if re.search(r"(#|//|/\*)\s*(todo|fixme)\b", lower) or re.search(r"\b(todo|fixme):", lower):
+                    findings.append({
+                        "file": file_path,
+                        "line": line_number,
+                        "severity": "LOW",
+                        "message": "New task marker added in changed code.",
+                        "fix": "Resolve it now or create a tracked issue before pushing.",
+                    })
+                if re.search(r"except\s+exception\s*:\s*$", lower):
+                    findings.append({
+                        "file": file_path,
+                        "line": line_number,
+                        "severity": "MEDIUM",
+                        "message": "Broad exception handler can hide real failures.",
+                        "fix": "Catch a narrower exception or log the exception details.",
+                    })
+        return findings
+
+    def open_review_issue(self, number=1):
+        title = self.config.get("conversation", {}).get("user_title", "sir")
+        findings = (self.last_review or {}).get("findings", [])
+        if not findings:
+            self.respond(f"I do not have review findings open yet, {title}. Say 'review code' first.")
+            return ActionResult(False, "No review")
+        index = max(1, int(number or 1)) - 1
+        if index >= len(findings):
+            self.respond(f"There are only {len(findings)} issue(s), {title}.")
+            return ActionResult(False, "Issue out of range")
+        finding = findings[index]
+        project_path = Path(self.last_review.get("path", APP_DIR))
+        self.open_file_in_editor(project_path / finding.get("file", ""), int(finding.get("line") or 1))
+        self.respond(f"Opened issue {index + 1}, {title}. {finding.get('fix', 'Review the highlighted code before pushing.')}")
+        return ActionResult(True, "Opened issue")
+
+    def apply_review_fix(self, number=1):
+        title = self.config.get("conversation", {}).get("user_title", "sir")
+        findings = (self.last_review or {}).get("findings", [])
+        if not findings:
+            self.respond(f"I need to review the project first, {title}. Say 'review code'.")
+            return ActionResult(False, "No review")
+        index = max(1, int(number or 1)) - 1
+        if index >= len(findings):
+            self.respond(f"There are only {len(findings)} issue(s), {title}.")
+            return ActionResult(False, "Issue out of range")
+        finding = findings[index]
+        project_path = Path(self.last_review.get("path", APP_DIR))
+        if finding.get("auto_fix") == "gitignore":
+            pattern = finding.get("ignore_pattern")
+            if not pattern:
+                return self.open_review_issue(index + 1)
+            gitignore = project_path / ".gitignore"
+            existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
+            lines = [line.strip() for line in existing.splitlines()]
+            if pattern not in lines:
+                ending = "" if existing.endswith("\n") or not existing else "\n"
+                gitignore.write_text(f"{existing}{ending}{pattern}\n", encoding="utf-8")
+                self.log(f"Applied fix: added {pattern} to .gitignore")
+            else:
+                self.log(f"Fix already present: {pattern} is in .gitignore")
+            self.respond(f"I applied the safe fix for issue {index + 1}, {title}. Run review again to verify.")
+            return ActionResult(True, "Applied fix")
+
+        self.open_review_issue(index + 1)
+        self.respond(f"That issue needs human approval, {title}. I opened it and gave you the suggested fix.")
+        return ActionResult(False, "Manual fix required")
+
+    def open_file_in_editor(self, path, line=1):
+        path = Path(path)
+        reviewer = self.config.get("reviewer", {})
+        editor = self.normalize(reviewer.get("editor", "pycharm"))
+        pycharm = reviewer.get("pycharm_exe") or self.find_pycharm_exe()
+        try:
+            if editor == "pycharm" and pycharm:
+                subprocess.Popen([pycharm, "--line", str(line), str(path)], **self.quiet_subprocess_kwargs())
+                return
+            if editor in {"code", "vscode"} and shutil.which("code"):
+                subprocess.Popen(["code", "-g", f"{path}:{line}"], **self.quiet_subprocess_kwargs())
+                return
+            self.open_system_target(path)
+        except Exception as error:
+            self.log(f"Could not open editor: {error}")
+
+    def find_pycharm_exe(self):
+        for name in ("pycharm64.exe", "pycharm.exe", "pycharm", "pycharm.sh"):
+            found = shutil.which(name)
+            if found:
+                return found
+        if self.is_windows():
+            roots = [
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs",
+                Path(os.environ.get("PROGRAMFILES", "")) / "JetBrains",
+                Path(os.environ.get("PROGRAMFILES(X86)", "")) / "JetBrains",
+            ]
+            for root in roots:
+                if root.exists():
+                    matches = list(root.glob("**/pycharm64.exe"))
+                    if matches:
+                        return str(matches[0])
+        return None
+
+    def push_project(self, target=None):
+        title = self.config.get("conversation", {}).get("user_title", "sir")
+        if not self.config.get("reviewer", {}).get("allow_push", False):
+            self.respond(f"Push is disabled in config, {title}.")
+            return ActionResult(False, "Push disabled")
+        key, project_path = self.resolve_project(target)
+        status = self.run_git(project_path, ["status", "--porcelain"]).stdout.strip()
+        if status:
+            self.respond(f"I will not push {key} while local changes are uncommitted, {title}. Commit or stash them first.")
+            return ActionResult(False, "Dirty tree")
+        result = self.run_git(project_path, ["push"])
+        if result.returncode == 0:
+            self.respond(f"{key} is pushed to GitHub, {title}.")
+            return ActionResult(True, "Pushed")
+        self.log(result.stderr or result.stdout)
+        self.respond(f"Git push failed for {key}, {title}. I logged the details.")
+        return ActionResult(False, "Push failed")
 
 class JarvisUI:
     def __init__(self):
@@ -1357,10 +1744,10 @@ class JarvisUI:
 
     def open_config(self):
         try:
-            os.startfile(str(CONFIG_PATH))
+            self.engine.open_system_target(CONFIG_PATH)
         except Exception:
-            NO_WINDOW = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0x08000000
-            subprocess.Popen(["notepad.exe", str(CONFIG_PATH)], creationflags=NO_WINDOW)
+            editor = "notepad.exe" if self.engine.is_windows() else os.environ.get("EDITOR", "nano")
+            subprocess.Popen([editor, str(CONFIG_PATH)], **self.engine.quiet_subprocess_kwargs())
 
     def reload_config(self):
         self.engine.refresh()

@@ -15,6 +15,7 @@ env/
 
 # Logs and local editor files
 *.log
+voice_samples/
 .idea/
 .vscode/
 

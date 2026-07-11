@@ -1,6 +1,6 @@
 # JARVIS PC Assistant
 
-A local Windows voice assistant for launching apps, opening websites and folders, playing music, running custom modes, and having lightweight butler-style conversation.
+A local PC voice assistant for launching apps, opening websites and folders, playing music, running custom modes, reviewing code, and having lightweight butler-style conversation. Windows is the main release target, and source mode also supports Linux.
 
 ## AI Setup (Required For Smart Responses)
 
@@ -27,6 +27,7 @@ ollama pull phi3:mini
 - Optional Gemini fallback with your own API key
 - Minimize-to-tray support
 - One-file Windows `.exe` build with PyInstaller
+- Linux source-mode support for launching apps, opening links/folders, voice, and code review
 
 ## Installation Guide
 
@@ -54,6 +55,19 @@ Or double-click:
 ```text
 run_jarvis.bat
 ```
+
+### Linux Notes
+
+Install Python 3.10-3.13, PortAudio, Tk, and an MP3 player for Edge TTS playback:
+
+```bash
+sudo apt update
+sudo apt install python3 python3-pip python3-tk portaudio19-dev ffmpeg
+python3 -m pip install -r requirements.txt
+python3 JARVIS_app.py
+```
+
+On Linux, JARVIS uses `xdg-open` for links/folders and normal shell commands for apps. For custom apps, set the target to the Linux command, for example `google-chrome`, `spotify`, `pycharm`, or `/home/you/AppImageName.AppImage`.
 
 ## Build The EXE Locally
 
@@ -102,9 +116,38 @@ chill mode
 study mode
 search best sci fi movies
 what time is it
+review code
+review my changes
+open first issue
+fix first issue
+push to github
 start ollama
 stop ollama
 ```
+
+## AI Code Review
+
+JARVIS can review local Git changes with Ollama (phi3:mini) or Gemini fallback.
+
+Voice or text examples:
+
+```text
+review code
+review my changes
+open first issue
+fix first issue
+```
+
+`fix first issue` only applies safe automatic fixes, such as adding generated folders to `.gitignore`. If a finding needs judgment, JARVIS opens the exact file and line instead of guessing.
+
+Config (`reviewer` in `config.json`):
+
+- `use_ai`: use AI for `review my changes` (default true)
+- `merge_rule_findings`: combine AI with local secret and task-marker checks
+- `max_diff_chars`: cap diff size sent to the model
+- `ollama_model`: local model name (default `phi3:mini`)
+- `projects`: map friendly project names to folders, so commands like `review jarvis` know where to go
+- `allow_push`: lets JARVIS run `git push` only when the working tree is clean
 
 ## Custom Apps
 

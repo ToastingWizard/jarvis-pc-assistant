@@ -15,8 +15,12 @@
     "auto_start": true,
     "tts_engine": "edge_tts",
     "edge_voice": "en-GB-RyanNeural",
-    "edge_rate": "-4%",
+    "edge_rate": "+4%",
     "edge_volume": "+0%",
+    "edge_connect_timeout": 3,
+    "edge_receive_timeout": 20,
+    "edge_retry_seconds": 180,
+    "tts_chunk_chars": 500,
     "pyttsx3_rate": 175
   },
   "conversation": {
@@ -87,5 +91,18 @@
         "url": "https://docs.google.com"
       }
     ]
+  },
+  "projects": {
+    "jarvis": "."
+  },
+  "reviewer": {
+    "default_project": "jarvis",
+    "editor": "pycharm",
+    "pycharm_exe": "",
+    "allow_push": true,
+    "use_ai": true,
+    "merge_rule_findings": true,
+    "max_diff_chars": 60000,
+    "ollama_model": "phi3:mini"
   }
 }
