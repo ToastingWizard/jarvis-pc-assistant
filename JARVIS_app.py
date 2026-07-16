@@ -132,6 +132,7 @@ class JarvisEngine:
         self._speech_cooldown_until = 0
         self._tts_engine = None
         self.last_review = None
+        self.pending_confirmation = None
 
     def is_windows(self):
         return os.name == "nt"
@@ -302,6 +303,10 @@ class JarvisEngine:
         if not command:
             self.respond("I am here. What are we doing today?")
             return ActionResult(True, "Ready")
+
+        confirmation_result = self.handle_pending_confirmation(command)
+        if confirmation_result is not None:
+            return confirmation_result
 
         music_target = self.extract_music_target(command)
         if music_target:
@@ -915,6 +920,19 @@ class JarvisEngine:
             return True
         return False
 
+    def is_conversation_window_open(self, conversation_active, last_interaction_time, now=None):
+        """Whether the 'skip the wake word for a bit' follow-up window is
+        still open. This is the fix for JARVIS reacting to background
+        speech (e.g. singing) indefinitely: the window must expire based
+        on conversation.session_timeout_seconds, and merely LOOKING like a
+        command is not, by itself, enough to open or extend it — see
+        JarvisUI.voice_loop, which is the only caller of this in practice."""
+        if not conversation_active:
+            return False
+        now = time.time() if now is None else now
+        timeout = float(self.config.get("conversation", {}).get("session_timeout_seconds", 600))
+        return (now - last_interaction_time) <= timeout
+
     def extract_review_action(self, command):
         command = self.normalize(command)
         ordinal_map = {
@@ -1002,13 +1020,23 @@ class JarvisEngine:
 
         status_text, diff_text = get_local_diff(self.run_git, project_path)
         changed_files = changed_files_from_status(status_text)
-        if not changed_files:
+
+        # Check for secret-shaped files that are already tracked by git,
+        # regardless of whether there are any uncommitted changes right
+        # now. A file merely being listed in .gitignore only stops FUTURE
+        # commits — it does nothing for a file (like config.json, which
+        # can hold the Gemini API key) that was already committed before
+        # the ignore rule existed.
+        tracked_secret_findings = self.check_tracked_secret_files(project_path)
+
+        if not changed_files and not tracked_secret_findings:
             self.last_review = {"project": key, "path": str(project_path), "findings": []}
             self.respond(f"I reviewed {key}. No local changes found, {title}.")
             return ActionResult(True, "No changes")
 
         findings = []
         rule_findings = self.build_review_findings(project_path, status_text, diff_text)
+        rule_findings.extend(tracked_secret_findings)
         if self.config.get("reviewer", {}).get("use_ai", True) and diff_text.strip():
             try:
                 ai_issues = query_ai_structured(self.config, diff_text, changed_files, self.log)
@@ -1047,6 +1075,41 @@ class JarvisEngine:
         else:
             self.respond(f"I reviewed {key}. No obvious issues in the local changes, {title}.")
         return ActionResult(True, "Reviewed")
+
+    def check_tracked_secret_files(self, project_path):
+        """Flags files that are already tracked by git and commonly hold
+        secrets (API keys, tokens, credentials), independent of the
+        current diff. Being listed in .gitignore only prevents FUTURE
+        commits of a file — it does not remove it if it was already
+        committed, so this checks what git actually has tracked."""
+        dangerous_names = {"config.json", ".env", "credentials.json", "secrets.json", "id_rsa"}
+        dangerous_suffixes = (".pem", ".key")
+        findings = []
+        try:
+            result = self.run_git(project_path, ["ls-files"])
+        except Exception as error:
+            self.log(f"Could not check tracked files: {error}")
+            return findings
+        for line in result.stdout.splitlines():
+            rel = line.strip().replace("\\", "/")
+            if not rel:
+                continue
+            name = rel.rsplit("/", 1)[-1].lower()
+            if name in dangerous_names or name.endswith(dangerous_suffixes):
+                findings.append({
+                    "file": rel,
+                    "line": 1,
+                    "severity": "HIGH",
+                    "message": (
+                        f"{rel} is tracked by git and commonly holds secrets (API keys, tokens). "
+                        f"Adding it to .gitignore does not remove it from history if it was already committed."
+                    ),
+                    "fix": (
+                        f"Run 'git rm --cached {rel}', confirm it's in .gitignore, commit that removal, "
+                        f"and rotate any keys inside it since they may already be in your git history."
+                    ),
+                })
+        return findings
 
     def build_review_findings(self, project_path, status_text, diff_text):
         findings = []
@@ -1199,7 +1262,14 @@ class JarvisEngine:
                         return str(matches[0])
         return None
 
+    CONFIRMATION_TIMEOUT_SECONDS = 30
+
     def push_project(self, target=None):
+        """Voice/text entry point for 'push to github'. Does NOT push
+        immediately — a single misheard phrase should never be able to
+        push code. Instead this validates the request, then arms a
+        pending confirmation that must be explicitly confirmed (see
+        handle_pending_confirmation) before any git command runs."""
         title = self.config.get("conversation", {}).get("user_title", "sir")
         if not self.config.get("reviewer", {}).get("allow_push", False):
             self.respond(f"Push is disabled in config, {title}.")
@@ -1209,6 +1279,54 @@ class JarvisEngine:
         if status:
             self.respond(f"I will not push {key} while local changes are uncommitted, {title}. Commit or stash them first.")
             return ActionResult(False, "Dirty tree")
+
+        self.pending_confirmation = {
+            "type": "push",
+            "key": key,
+            "project_path": project_path,
+            "expires": time.time() + self.CONFIRMATION_TIMEOUT_SECONDS,
+        }
+        self.respond(
+            f"Ready to push {key} to GitHub, {title}. Say 'confirm push' to go ahead, "
+            f"or 'cancel' to stop."
+        )
+        return ActionResult(True, "Awaiting push confirmation")
+
+    def handle_pending_confirmation(self, command):
+        """Checks a normalized command against any pending confirmation
+        (currently only git push). Returns an ActionResult if it consumed
+        the command, or None if there was nothing pending / it wasn't a
+        confirm/cancel reply, so normal command parsing should continue."""
+        pending = self.pending_confirmation
+        if not pending:
+            return None
+
+        title = self.config.get("conversation", {}).get("user_title", "sir")
+        if time.time() > pending.get("expires", 0):
+            self.pending_confirmation = None
+            return None  # expired silently; treat this as a fresh command
+
+        confirm_phrases = {"confirm push", "confirm", "yes", "yes push", "push confirm", "confirmed", "do it"}
+        cancel_phrases = {"cancel push", "cancel", "no", "never mind", "nevermind", "stop", "abort"}
+
+        if command in confirm_phrases:
+            self.pending_confirmation = None
+            if pending["type"] == "push":
+                return self._execute_push(pending["key"], pending["project_path"])
+
+        if command in cancel_phrases:
+            self.pending_confirmation = None
+            self.respond(f"Cancelled, {title}. Nothing was pushed.")
+            return ActionResult(True, "Push cancelled")
+
+        # Anything else: leave the confirmation pending (still within its
+        # timeout window) and let the command parse normally, so an
+        # unrelated command right after a push request doesn't get
+        # silently swallowed.
+        return None
+
+    def _execute_push(self, key, project_path):
+        title = self.config.get("conversation", {}).get("user_title", "sir")
         result = self.run_git(project_path, ["push"])
         if result.returncode == 0:
             self.respond(f"{key} is pushed to GitHub, {title}.")
@@ -1513,8 +1631,11 @@ class JarvisUI:
     def startup_greeting(self):
         greeting = "Good to see you, sir. What are we doing today?"
         self.engine.respond(greeting)
-        self.conversation_active = True
-        self.last_interaction_time = time.time()
+        # Note: we deliberately do NOT open a conversation window here.
+        # JARVIS should wait for the wake phrase before treating anything
+        # it hears as a command — otherwise background speech (singing,
+        # TV, other people talking) gets picked up as if you were
+        # addressing it. See voice_loop() for the wake/timeout logic.
 
     def start_voice(self):
         if self.voice_running: return
@@ -1587,10 +1708,31 @@ class JarvisUI:
                         if not text:
                             continue
                         self.enqueue_log(f"Heard: {text}")
-                        
+
                         addressed = self.engine.was_addressed_to_jarvis(text)
-                        actionable = self.is_actionable_voice_command(text)
-                        if addressed or self.conversation_active or actionable:
+
+                        # A follow-up "conversation window" lets you skip the
+                        # wake word for a little while after JARVIS was last
+                        # addressed. It must expire — otherwise, once opened
+                        # (e.g. right after "hey jarvis"), JARVIS keeps
+                        # treating *everything* it hears as a command
+                        # forever, including song lyrics, other people
+                        # talking, or the TV.
+                        window_open = self.engine.is_conversation_window_open(
+                            self.conversation_active, self.last_interaction_time
+                        )
+                        if self.conversation_active and not window_open:
+                            self.conversation_active = False
+                            self.enqueue_log("Conversation window timed out — say the wake word again.")
+
+                        # Only react if JARVIS was directly addressed, or
+                        # we're inside an already-open follow-up window.
+                        # Note: a phrase merely *looking* like a command
+                        # (e.g. "play" or "stop" appearing in a song lyric)
+                        # is intentionally NOT enough on its own anymore —
+                        # that used to make JARVIS jump on background
+                        # speech/singing even when nobody was talking to it.
+                        if addressed or window_open:
                             self.conversation_active = True
                             self.last_interaction_time = time.time()
                             if self.is_shutdown_request(text):
