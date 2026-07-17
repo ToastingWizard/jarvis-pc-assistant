@@ -6,10 +6,7 @@ import random
 import re
 import shutil
 import shlex
-HEAD
-
 import socket
-5fe6134 (Add web-based UI (webview_ui.py + web/) alongside classic Tkinter UI)
 import subprocess
 import threading
 import time
@@ -88,10 +85,9 @@ DEFAULT_CONFIG = {
         "google": "https://www.google.com",
         "netflix": "https://www.netflix.com",
     },
- HEAD
 
     "website_cache": {},
- 5fe6134 (Add web-based UI (webview_ui.py + web/) alongside classic Tkinter UI)
+ 
     "playlists": {
         "liked songs": "spotify:collection:tracks",
         "discover weekly": "spotify:playlist:37i9dQZEVXcQ",
@@ -433,14 +429,13 @@ class JarvisEngine:
             if command.startswith(prefix):
                 return "mode", command[len(prefix):].strip()
 
- HEAD
+ 
 
         search_prefixes = ["search for ", "search ", "google ", "look up "]
         for prefix in search_prefixes:
             if command.startswith(prefix):
                 return "search", command[len(prefix):].strip()
 
- 5fe6134 (Add web-based UI (webview_ui.py + web/) alongside classic Tkinter UI)
         open_prefixes = ["open ", "launch ", "start ", "run ", "pull up ", "bring up "]
         for prefix in open_prefixes:
             if command.startswith(prefix):
@@ -638,7 +633,7 @@ class JarvisEngine:
                 self.respond(f"Opening your {name} folder, sir.")
             return self.launch(expanded)
 
-HEAD
+
         # Learned website cache: a URL the website finder already found
         # once (see find_website below). Checking this before searching
         # again means a repeat "open X" is instant, not a fresh search.
@@ -662,12 +657,11 @@ HEAD
             self.open_url(found)
             return ActionResult(True, found)
 
- 5fe6134 (Add web-based UI (webview_ui.py + web/) alongside classic Tkinter UI)
         if announce:
             self.respond(f"I couldn't find {name}, sir. Try adding it in the sidebar.")
         return ActionResult(False, "Not found")
 
- HEAD
+ 
     def find_website(self, query):
         """The one place JARVIS talks to a search provider to resolve
         'open <something>' when it's not an app, saved website, or
@@ -709,7 +703,6 @@ HEAD
         self.respond(f"Searching for {query}, {title}.")
         self.open_url(url)
         return ActionResult(True, url)
- 5fe6134 (Add web-based UI (webview_ui.py + web/) alongside classic Tkinter UI)
     def launch(self, target):
         target = os.path.expandvars(os.path.expanduser(str(target)))
         try:
@@ -918,7 +911,7 @@ HEAD
                     req = _req.Request(
                         "http://localhost:11434/api/generate",
                         data=payload,
-                        headers={"Content-Type": "application/json"},
+                        ers={"Content-Type": "application/json"},
                         method="POST"
                     )
                     with _req.urlopen(req, timeout=120) as resp:
@@ -937,7 +930,7 @@ HEAD
                             "generationConfig": {"maxOutputTokens": 300}
                         }).encode("utf-8")
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
-                        req = _req.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+                        req = _req.Request(url, data=payload, ers={"Content-Type": "application/json"}, method="POST")
                         with _req.urlopen(req, timeout=15) as resp:
                             data = _json.loads(resp.read().decode("utf-8"))
                             reply = self.clean_ai_reply(data["candidates"][0]["content"]["parts"][0]["text"])
@@ -1371,7 +1364,7 @@ HEAD
             "expires": time.time() + self.CONFIRMATION_TIMEOUT_SECONDS,
         }
         self.respond(
-            f"Ready to push {key} to GitHub, {title}. Say 'confirm push' to go ahead, "
+            f"Ready to push {key} to GitHub, {title}. Say 'confirm push' to go a, "
             f"or 'cancel' to stop."
         )
         return ActionResult(True, "Awaiting push confirmation")
@@ -1552,28 +1545,28 @@ class JarvisUI:
         self.main_panel = Frame(self.app_container, bg=self.colors["bg"], padx=30, pady=20)
         self.main_panel.pack(side=RIGHT, fill=BOTH, expand=True)
         
-        header = Frame(self.main_panel, bg=self.colors["bg"])
-        header.pack(fill="x")
-        ttk.Button(header, text="Menu", width=8, command=self.toggle_sidebar).pack(side=LEFT)
-        Label(header, textvariable=self.status_text, font=("Consolas", 10), fg=self.colors["muted"], bg=self.colors["bg"]).pack(side=LEFT, padx=15)
-        ttk.Button(header, text="Shut Down", command=self.shutdown).pack(side=RIGHT)
+        er = Frame(self.main_panel, bg=self.colors["bg"])
+        er.pack(fill="x")
+        ttk.Button(er, text="Menu", width=8, command=self.toggle_sidebar).pack(side=LEFT)
+        Label(er, textvariable=self.status_text, font=("Consolas", 10), fg=self.colors["muted"], bg=self.colors["bg"]).pack(side=LEFT, padx=15)
+        ttk.Button(er, text="Shut Down", command=self.shutdown).pack(side=RIGHT)
 
         # X button minimizes to background, no confirm dialog
         self.root.protocol("WM_DELETE_WINDOW", self.minimize_to_background)
 
         self.home_modes = Frame(self.main_panel, bg=self.colors["panel"], padx=16, pady=12)
         self.home_modes.pack(fill="x", pady=(18, 0))
-        mode_head = Frame(self.home_modes, bg=self.colors["panel"])
-        mode_head.pack(fill="x")
+        mode_ = Frame(self.home_modes, bg=self.colors["panel"])
+        mode_.pack(fill="x")
         Label(
-            mode_head,
+            mode_,
             text="Your Modes",
             font=("Consolas", 12, "bold"),
             fg=self.colors["text"],
             bg=self.colors["panel"],
         ).pack(side=LEFT)
-        ttk.Button(mode_head, text="+ New Mode", style="Primary.TButton", command=self.create_mode).pack(side=RIGHT)
-        ttk.Button(mode_head, text="View Modes", command=self.open_modes_sidebar).pack(side=RIGHT, padx=(0, 8))
+        ttk.Button(mode_, text="+ New Mode", style="Primary.TButton", command=self.create_mode).pack(side=RIGHT)
+        ttk.Button(mode_, text="View Modes", command=self.open_modes_sidebar).pack(side=RIGHT, padx=(0, 8))
         self.home_modes_row = Frame(self.home_modes, bg=self.colors["panel"])
         self.home_modes_row.pack(fill="x", pady=(10, 0))
         self.refresh_home_modes()
@@ -2200,10 +2193,9 @@ class ItemEditor:
         self.window.destroy()
 
 
- HEAD
+ 
 if __name__ == "__main__":
     JarvisUI().run()
-=======
 _SINGLE_INSTANCE_SOCKET = None
 
 
@@ -2241,4 +2233,4 @@ if __name__ == "__main__":
     except Exception as exc:
         print(f"Web UI unavailable ({exc}); falling back to the classic interface.")
         JarvisUI().run()
- 5fe6134 (Add web-based UI (webview_ui.py + web/) alongside classic Tkinter UI)
+
