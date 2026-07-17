@@ -6,6 +6,10 @@ import random
 import re
 import shutil
 import shlex
+HEAD
+
+import socket
+5fe6134 (Add web-based UI (webview_ui.py + web/) alongside classic Tkinter UI)
 import subprocess
 import threading
 import time
@@ -84,6 +88,10 @@ DEFAULT_CONFIG = {
         "google": "https://www.google.com",
         "netflix": "https://www.netflix.com",
     },
+ HEAD
+
+    "website_cache": {},
+ 5fe6134 (Add web-based UI (webview_ui.py + web/) alongside classic Tkinter UI)
     "playlists": {
         "liked songs": "spotify:collection:tracks",
         "discover weekly": "spotify:playlist:37i9dQZEVXcQ",
@@ -425,6 +433,14 @@ class JarvisEngine:
             if command.startswith(prefix):
                 return "mode", command[len(prefix):].strip()
 
+ HEAD
+
+        search_prefixes = ["search for ", "search ", "google ", "look up "]
+        for prefix in search_prefixes:
+            if command.startswith(prefix):
+                return "search", command[len(prefix):].strip()
+
+ 5fe6134 (Add web-based UI (webview_ui.py + web/) alongside classic Tkinter UI)
         open_prefixes = ["open ", "launch ", "start ", "run ", "pull up ", "bring up "]
         for prefix in open_prefixes:
             if command.startswith(prefix):
@@ -622,10 +638,78 @@ class JarvisEngine:
                 self.respond(f"Opening your {name} folder, sir.")
             return self.launch(expanded)
 
+HEAD
+        # Learned website cache: a URL the website finder already found
+        # once (see find_website below). Checking this before searching
+        # again means a repeat "open X" is instant, not a fresh search.
+        cached = self.config.get("website_cache", {}).get(name)
+        if cached:
+            if announce:
+                self.respond(f"Opening {name} in your browser, sir.")
+            self.open_url(cached)
+            return ActionResult(True, cached)
+
+        # Final fallback: search the web for the official site. Only
+        # runs once nothing faster (app, saved website, cache, folder)
+        # matched — see find_website() for the single place that talks
+        # to a search provider.
+        found = self.find_website(name)
+        if found:
+            self.config.setdefault("website_cache", {})[name] = found
+            self.save_config()
+            if announce:
+                self.respond(f"Found {name}, sir. Opening it now.")
+            self.open_url(found)
+            return ActionResult(True, found)
+
+ 5fe6134 (Add web-based UI (webview_ui.py + web/) alongside classic Tkinter UI)
         if announce:
             self.respond(f"I couldn't find {name}, sir. Try adding it in the sidebar.")
         return ActionResult(False, "Not found")
 
+ HEAD
+    def find_website(self, query):
+        """The one place JARVIS talks to a search provider to resolve
+        'open <something>' when it's not an app, saved website, or
+        already-cached lookup. Swapping providers later (DuckDuckGo ->
+        Bing/Brave/etc.) only means changing this function."""
+        query = self.normalize(query)
+        if not query:
+            return None
+        try:
+            from ddgs import DDGS
+        except ImportError:
+            self.log("Website finder unavailable: run 'pip install ddgs'.")
+            return None
+        try:
+            results = DDGS().text(f"{query} official website", max_results=5)
+        except Exception as error:
+            self.log(f"Website finder search failed: {error}")
+            return None
+        skip_domains = ("google.", "bing.com", "duckduckgo.com", "search.yahoo.com", "wikipedia.org")
+        for item in results or []:
+            url = str((item or {}).get("href") or "").strip()
+            if not url.startswith(("http://", "https://")):
+                continue
+            if any(domain in url for domain in skip_domains):
+                continue
+            return url
+        return None
+
+    def search_web(self, query):
+        """Explicit 'search for X' command — opens a normal search
+        results page. Distinct from find_website(), which silently
+        resolves a single 'open X' request to one official site."""
+        title = self.config.get("conversation", {}).get("user_title", "sir")
+        query = query.strip()
+        if not query:
+            self.respond(f"What would you like me to search for, {title}?")
+            return ActionResult(False, "No query")
+        url = "https://www.google.com/search?q=" + urllib.parse.quote_plus(query)
+        self.respond(f"Searching for {query}, {title}.")
+        self.open_url(url)
+        return ActionResult(True, url)
+ 5fe6134 (Add web-based UI (webview_ui.py + web/) alongside classic Tkinter UI)
     def launch(self, target):
         target = os.path.expandvars(os.path.expanduser(str(target)))
         try:
@@ -2116,5 +2200,45 @@ class ItemEditor:
         self.window.destroy()
 
 
+ HEAD
 if __name__ == "__main__":
     JarvisUI().run()
+=======
+_SINGLE_INSTANCE_SOCKET = None
+
+
+def acquire_single_instance_lock(port=47771):
+    """Stops a second JARVIS process from starting alongside one that's
+    already running. Two live processes means two engines, two
+    microphone listeners, and two text-to-speech threads, all reacting
+    to the same thing you say — that's what was causing websites to
+    open twice and JARVIS's voice to sound doubled. Returns True if this
+    is the only instance; False if another one already holds the lock."""
+    global _SINGLE_INSTANCE_SOCKET
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", port))
+        s.listen(1)
+    except OSError:
+        s.close()
+        return False
+    _SINGLE_INSTANCE_SOCKET = s  # kept open for the life of the process
+    return True
+
+
+if __name__ == "__main__":
+    if not acquire_single_instance_lock():
+        print("JARVIS is already running — not starting a second instance.")
+        sys.exit(0)
+
+    # Prefer the new web-based UI (webview_ui.py). Falls back to the
+    # classic Tkinter interface if pywebview isn't installed or the
+    # web/ assets aren't next to this file, so this never leaves you
+    # with nothing running.
+    try:
+        from webview_ui import JarvisWebController
+        JarvisWebController().start()
+    except Exception as exc:
+        print(f"Web UI unavailable ({exc}); falling back to the classic interface.")
+        JarvisUI().run()
+ 5fe6134 (Add web-based UI (webview_ui.py + web/) alongside classic Tkinter UI)

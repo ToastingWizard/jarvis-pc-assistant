@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Local user configuration
 config.json
 
@@ -22,3 +23,30 @@ voice_samples/
 # OS clutter
 Thumbs.db
 Desktop.ini
+=======
+
+build/
+# Build outputs
+config.json
+Desktop.ini
+dist/
+env/
+.idea/
+# Local user configuration
+*.log
+# Logs and local editor files
+# OS clutter
+*.pyc
+__pycache__/
+*.py[cod]
+# Python cache and virtual environments
+*.spec.bak
+Thumbs.db
+.venv/
+voice_samples/
+.vscode/
+test_conversation_window.py
+test_push_confirmation.py
+test_review_safety.py
+test_website_finder.py
+>>>>>>> 5fe6134 (Add web-based UI (webview_ui.py + web/) alongside classic Tkinter UI)
