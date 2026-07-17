@@ -1,25 +1,3 @@
- HEAD
-# Tests
-
-Run with:
-
-```
-pip install -r requirements-dev.txt
-pytest
-```
-
-These tests exercise `JarvisEngine` directly rather than the Tkinter
-`JarvisUI`, since that's where the actual decision-making logic lives
-(wake-word/conversation gating, git push, code review rules) and it can
-be tested headlessly without a display. `JarvisUI` stays a thin layer
-that wires that logic up to the mic, the window, and the tray icon.
-
-- `test_conversation_window.py` — the wake-word / "singing gets picked
-  up as commands" fix.
-- `test_push_confirmation.py` — the git push confirmation flow.
-- `test_review_safety.py` — tracked-secret-file detection and the
-  fix-first-issue safety whitelist.
-
 # JARVIS PC Assistant
 
 A local PC voice assistant for launching apps, opening websites and folders, playing music, running custom modes, reviewing code, and having lightweight butler-style conversation. Windows is the main release target, and source mode also supports Linux.
@@ -84,7 +62,7 @@ Install Python 3.10-3.13, PortAudio, Tk, and an MP3 player for Edge TTS playback
 
 ```bash
 sudo apt update
-sudo apt install python3 python3-pip python3-tk portaudio19-dev ffmpeg
+sudo apt install python3.13 python3.13-pip python3.13-tk portaudio19-dev ffmpeg
 python3 -m pip install -r requirements.txt
 python3 JARVIS_app.py
 ```
