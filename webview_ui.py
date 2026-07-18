@@ -1,24 +1,10 @@
 """
 webview_ui.py — JARVIS's web-based control panel.
-
-This is an alternative front-end to the Tkinter JarvisUI in JARVIS_app.py.
-It renders web/index.html (HTML/CSS/JS) inside a native window via
-pywebview, and talks to the *exact same* JarvisEngine used by the Tkinter
-UI and covered by the test suite — this file adds zero new decision-making
-logic of its own for anything engine-related. It only:
-
-  1. Exposes a small JS-callable API (Api class) that forwards into
-     JarvisEngine methods.
-  2. Ports JarvisUI.voice_loop's wake-word/conversation-window dispatch
-     (unchanged in behavior) so voice control still works from this UI.
-  3. Streams engine.log() output into the page's log feed.
-
-Run with:  python webview_ui.py
-Requires:  pip install pywebview
 """
 from __future__ import annotations
 
 import dataclasses
+import os
 import threading
 import time
 from pathlib import Path
@@ -33,12 +19,10 @@ WEB_DIR = Path(__file__).resolve().parent / "web"
 def _result_dict(result: ActionResult) -> dict:
     if isinstance(result, ActionResult):
         return dataclasses.asdict(result)
-    # A few engine paths (e.g. threaded ones) return None; treat as ack.
     return {"ok": True, "message": ""}
 
 
 class JarvisWebController:
-    """Owns the engine, the pywebview window, and the ported voice loop."""
 
     def __init__(self, config_path=CONFIG_PATH):
         self.engine = JarvisEngine(config_path=config_path, log=self._on_engine_log)
@@ -47,8 +31,6 @@ class JarvisWebController:
         self._voice_lock = threading.Lock()
         self.conversation_active = False
         self.last_interaction_time = 0.0
-
-    # ---------------- window lifecycle ----------------
 
     def start(self):
         api = Api(self)
@@ -64,6 +46,12 @@ class JarvisWebController:
             easy_drag=True,
         )
         webview.start(self._on_ready, debug=False)
+        # webview.start() blocks until the window is closed.
+        # When it returns, force a clean process exit so no background
+        # threads (voice loop, TTS worker, etc.) keep JARVIS alive
+        # invisibly — which is exactly what caused the "4 JARVISes
+        # talking at once" bug.
+        os._exit(0)
 
     def _on_ready(self):
         threading.Thread(target=self._greet_later, daemon=True).start()
@@ -71,13 +59,8 @@ class JarvisWebController:
     def _greet_later(self):
         time.sleep(0.6)
         self.engine.respond("Good to see you, sir. What are we doing today?")
-        # Deliberately not opening the conversation window here — JARVIS
-        # should wait for the wake phrase, same as the Tkinter UI. See
-        # voice_loop() below for the full reasoning.
         if self.engine.config.get("voice", {}).get("auto_start", True):
             self.start_voice()
-
-    # ---------------- log bridge ----------------
 
     def _on_engine_log(self, text: str):
         if not self.window:
@@ -86,9 +69,7 @@ class JarvisWebController:
         try:
             self.window.evaluate_js(f"window.jarvisLog(`{safe}`)")
         except Exception:
-            pass  # window may be closing
-
-    # ---------------- voice loop (ported from JarvisUI.voice_loop) ----------------
+            pass
 
     def start_voice(self):
         with self._voice_lock:
@@ -205,7 +186,7 @@ class JarvisWebController:
                             self.last_interaction_time = time.time()
                             if self.is_shutdown_request(text):
                                 self.engine.respond("Shutting down. Goodbye, sir.")
-                                threading.Timer(3.5, self._shutdown).start()
+                                threading.Timer(3.5, self._hard_exit).start()
                             elif self.is_show_request(text):
                                 if self.window:
                                     self.window.restore()
@@ -222,19 +203,23 @@ class JarvisWebController:
             self.engine.log(f"JARVIS: mic error — {e}")
             self.voice_running = False
 
-    def _shutdown(self):
-        if self.window:
-            self.window.destroy()
+    def _hard_exit(self):
+        """Destroy the window and force the process to exit cleanly."""
+        try:
+            if self.window:
+                self.window.destroy()
+        except Exception:
+            pass
+        # Give pywebview/GTK 1 second to clean up, then hard-exit.
+        # This is the only reliable way to stop all daemon threads
+        # (voice loop, TTS worker, etc.) on all platforms.
+        threading.Timer(1.0, lambda: os._exit(0)).start()
 
 
 class Api:
-    """JS-callable surface. Every method here is reachable in app.js as
-    window.pywebview.api.<method_name>(...)."""
 
     def __init__(self, controller: JarvisWebController):
         self.c = controller
-
-    # ---- dashboard data ----
 
     def get_dashboard_data(self):
         cfg = self.c.engine.config
@@ -252,8 +237,6 @@ class Api:
                 for name, steps in modes.items()
             },
         }
-
-    # ---- actions ----
 
     def run_action(self, kind, name):
         engine = self.c.engine
@@ -307,15 +290,13 @@ class Api:
             "conversation_active": bool(self.c.conversation_active),
         }
 
-    # ---- window chrome ----
-
     def minimize(self):
         if self.c.window:
             self.c.window.minimize()
 
     def close(self):
-        if self.c.window:
-            self.c.window.destroy()
+        # Trigger a hard exit so no background threads linger.
+        threading.Thread(target=self.c._hard_exit, daemon=True).start()
 
 
 if __name__ == "__main__":
