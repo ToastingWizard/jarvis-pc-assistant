@@ -58,13 +58,43 @@ run_jarvis.bat
 
 ### Linux Notes
 
-Install Python 3.10-3.13, PortAudio, Tk, and an MP3 player for Edge TTS playback:
+The easiest way to get set up on Ubuntu/Debian is the included setup script.
+It installs everything JARVIS needs -- audio libraries, and the GTK/WebKit
+stack the web UI runs on -- and creates a Python 3.13 virtual environment
+(3.14 breaks voice recognition, so this matters):
+
+```bash
+chmod +x setup_linux.sh
+./setup_linux.sh
+```
+
+Then, every time you want to run JARVIS:
+
+```bash
+source venv/bin/activate
+python JARVIS_app.py
+```
+
+If it ever prints `Web UI unavailable (...)`, JARVIS still works fine using
+its classic interface -- that message just means one of the system GTK/WebKit
+packages couldn't be installed automatically (the exact package name can
+vary between Ubuntu versions). The error message names what's missing if you
+want to track it down; search `apt-cache search webkit2` for the matching
+package name on your release.
+
+**Doing it manually instead of the script:**
 
 ```bash
 sudo apt update
-sudo apt install python3.13 python3.13-pip python3.13-tk portaudio19-dev ffmpeg
-python3 -m pip install -r requirements.txt
-python3 JARVIS_app.py
+sudo apt install python3.13 python3.13-venv python3.13-dev \
+    portaudio19-dev python3-tk ffmpeg \
+    python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-webkit2-4.1 \
+    libgirepository-2.0-dev gir1.2-girepository-2.0 libcairo2-dev pkg-config gcc
+python3.13 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+pip install pycairo PyGObject
+python JARVIS_app.py
 ```
 
 On Linux, JARVIS uses `xdg-open` for links/folders and normal shell commands for apps. For custom apps, set the target to the Linux command, for example `google-chrome`, `spotify`, `pycharm`, or `/home/you/AppImageName.AppImage`.
@@ -226,5 +256,3 @@ Modes are routines made of apps, websites, playlists, folders, and delays:
 ```
 
 You can create modes directly in the JARVIS UI.
-
- 5fe6134 (Add web-based UI (webview_ui.py + web/) alongside classic Tkinter UI)
