@@ -26,6 +26,21 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pyinstaller
 
+      - name: Debug working directory
+        shell: cmd
+        run: |
+          echo Current directory:
+          cd
+          echo.
+          echo Files in current directory:
+          dir
+          echo.
+          echo Looking for NaiTRO.spec...
+          dir /s NaiTRO.spec
+          echo.
+          echo Repository tree:
+          dir /s
+
       - name: Build executable
         run: python -m PyInstaller .\NaiTRO.spec --noconfirm
 
