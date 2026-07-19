@@ -3,11 +3,13 @@
 import sys
 
 block_cipher = None
-icon_file = ['NaiTRO.ico'] if sys.platform.startswith('win') else None
-data_files = [('NaiTRO.ico', '.')] if sys.platform.startswith('win') else []
+icon_file = ['assets/NaiTRO.ico'] if sys.platform.startswith('win') else None
+data_files = [('assets/NaiTRO.ico', '.')] if sys.platform.startswith('win') else []
 
 a = Analysis(
+    ['Python/naitro_app.py'],
     ['naitro_app.py'],
+    ['['Python/naitro_app.py']'],
     pathex=[],
     binaries=[],
     datas=data_files,
