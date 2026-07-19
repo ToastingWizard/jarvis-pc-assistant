@@ -3,15 +3,15 @@
 import sys
 
 block_cipher = None
-icon_file = ['JARVIS.ico'] if sys.platform.startswith('win') else None
-data_files = [('JARVIS.ico', '.')] if sys.platform.startswith('win') else []
+icon_file = ['NaiTRO.ico'] if sys.platform.startswith('win') else None
+data_files = [('NaiTRO.ico', '.')] if sys.platform.startswith('win') else []
 
 a = Analysis(
-    ['JARVIS_app.py'],
+    ['naitro_app.py'],
     pathex=[],
     binaries=[],
     datas=data_files,
-    hiddenimports=['jarvis_reviewer'],
+    hiddenimports=['naitro_reviewer'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -27,7 +27,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='JARVIS',
+    name='NaiTRO',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

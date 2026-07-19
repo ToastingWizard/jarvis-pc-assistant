@@ -4,7 +4,7 @@ dir = fso.GetParentFolderName(WScript.ScriptFullName)
 
 ' Try pythonw first (no console window)
 pythonw = "pythonw.exe"
-script = dir & "\JARVIS_app.py"
+script = dir & "\naitro_app.py"
 
 On Error Resume Next
 sh.Run """" & pythonw & """ """ & script & """", 0, False

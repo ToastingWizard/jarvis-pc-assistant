@@ -1,5 +1,5 @@
 """
-webview_ui.py — JARVIS's web-based control panel.
+webview_ui.py — NaiTRO's web-based control panel.
 """
 from __future__ import annotations
 
@@ -11,9 +11,10 @@ from pathlib import Path
 
 import webview
 
-from JARVIS_app import ActionResult, CONFIG_PATH, JarvisEngine
+from naitro_app import ActionResult, CONFIG_PATH, NaitroEngine
 
-WEB_DIR = Path(__file__).resolve().parent / "web"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent  # Python/ -> project root
+WEB_INDEX = PROJECT_ROOT / "web" / "react-ui" / "dist" / "index.html"
 
 
 def _result_dict(result: ActionResult) -> dict:
@@ -22,10 +23,10 @@ def _result_dict(result: ActionResult) -> dict:
     return {"ok": True, "message": ""}
 
 
-class JarvisWebController:
+class NaitroWebController:
 
     def __init__(self, config_path=CONFIG_PATH):
-        self.engine = JarvisEngine(config_path=config_path, log=self._on_engine_log)
+        self.engine = NaitroEngine(config_path=config_path, log=self._on_engine_log)
         self.window: webview.Window | None = None
         self.voice_running = False
         self._voice_lock = threading.Lock()
@@ -33,10 +34,15 @@ class JarvisWebController:
         self.last_interaction_time = 0.0
 
     def start(self):
+        if not WEB_INDEX.exists():
+            raise FileNotFoundError(
+                f"React UI build not found at {WEB_INDEX}. "
+                f"Run: cd web/react-ui && npm install && npm run build"
+            )
         api = Api(self)
         self.window = webview.create_window(
-            "JARVIS",
-            url=str(WEB_DIR / "index.html"),
+            "NaiTRO",
+            url=str(WEB_INDEX),
             js_api=api,
             width=1180,
             height=760,
@@ -48,8 +54,8 @@ class JarvisWebController:
         webview.start(self._on_ready, debug=False)
         # webview.start() blocks until the window is closed.
         # When it returns, force a clean process exit so no background
-        # threads (voice loop, TTS worker, etc.) keep JARVIS alive
-        # invisibly — which is exactly what caused the "4 JARVISes
+        # threads (voice loop, TTS worker, etc.) keep NaiTRO alive
+        # invisibly — which is exactly what caused the "4 NaiTROes
         # talking at once" bug.
         os._exit(0)
 
@@ -67,7 +73,7 @@ class JarvisWebController:
             return
         safe = text.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
         try:
-            self.window.evaluate_js(f"window.jarvisLog(`{safe}`)")
+            self.window.evaluate_js(f"window.naitroLog(`{safe}`)")
         except Exception:
             pass
 
@@ -105,9 +111,9 @@ class JarvisWebController:
         if not alternatives:
             return ""
 
-        self.engine.log(f"JARVIS: heard options — {', '.join(alternatives[:3])}")
+        self.engine.log(f"NaiTRO: heard options — {', '.join(alternatives[:3])}")
         for candidate in alternatives:
-            if self.engine.was_addressed_to_jarvis(candidate) or self.is_actionable_voice_command(candidate):
+            if self.engine.was_addressed_to_naitro(candidate) or self.is_actionable_voice_command(candidate):
                 return self.engine.repair_wake_mishear(candidate)
         return self.engine.repair_wake_mishear(alternatives[0])
 
@@ -115,9 +121,9 @@ class JarvisWebController:
         norm = self.engine.normalize(text)
         command = self.engine.strip_wake_phrase(norm)
         shutdown_phrases = {
-            "shut down jarvis", "shutdown jarvis", "exit jarvis", "quit jarvis",
-            "close jarvis", "power off jarvis", "turn off jarvis",
-            "goodbye jarvis", "bye jarvis",
+            "shut down naitro", "shutdown naitro", "exit naitro", "quit naitro",
+            "close naitro", "power off naitro", "turn off naitro",
+            "goodbye naitro", "bye naitro",
         }
         shutdown_commands = {
             "shut down", "shutdown", "exit", "quit", "close",
@@ -130,8 +136,8 @@ class JarvisWebController:
         norm = self.engine.normalize(text)
         command = self.engine.strip_wake_phrase(norm)
         show_phrases = {
-            "show jarvis", "open jarvis", "bring up jarvis", "show yourself",
-            "come back", "jarvis show", "jarvis open", "wake up jarvis",
+            "show naitro", "open naitro", "bring up naitro", "show yourself",
+            "come back", "naitro show", "naitro open", "wake up naitro",
         }
         show_commands = {"show yourself", "show", "come back", "wake up"}
         return norm in show_phrases or command in show_commands
@@ -140,7 +146,7 @@ class JarvisWebController:
         try:
             import speech_recognition as sr
         except ImportError:
-            self.engine.log("JARVIS: SpeechRecognition not installed.")
+            self.engine.log("NaiTRO: SpeechRecognition not installed.")
             self.voice_running = False
             return
 
@@ -166,20 +172,20 @@ class JarvisWebController:
                             phrase_time_limit=float(voice.get("phrase_time_limit", 9)),
                         )
                         if self.engine.is_audio_output_active():
-                            self.engine.log("JARVIS: ignored voice while speaking.")
+                            self.engine.log("NaiTRO: ignored voice while speaking.")
                             continue
                         text = self.recognize_best_text(recognizer, audio, sr)
                         if not text:
                             continue
-                        self.engine.log(f"JARVIS: heard — {text}")
+                        self.engine.log(f"NaiTRO: heard — {text}")
 
-                        addressed = self.engine.was_addressed_to_jarvis(text)
+                        addressed = self.engine.was_addressed_to_naitro(text)
                         window_open = self.engine.is_conversation_window_open(
                             self.conversation_active, self.last_interaction_time
                         )
                         if self.conversation_active and not window_open:
                             self.conversation_active = False
-                            self.engine.log("JARVIS: conversation window timed out — say the wake word again.")
+                            self.engine.log("NaiTRO: conversation window timed out — say the wake word again.")
 
                         if addressed or window_open:
                             self.conversation_active = True
@@ -198,9 +204,9 @@ class JarvisWebController:
                     except sr.UnknownValueError:
                         continue
                     except Exception as e:
-                        self.engine.log(f"JARVIS: voice error — {e}")
+                        self.engine.log(f"NaiTRO: voice error — {e}")
         except Exception as e:
-            self.engine.log(f"JARVIS: mic error — {e}")
+            self.engine.log(f"NaiTRO: mic error — {e}")
             self.voice_running = False
 
     def _hard_exit(self):
@@ -218,14 +224,14 @@ class JarvisWebController:
 
 class Api:
 
-    def __init__(self, controller: JarvisWebController):
+    def __init__(self, controller: NaitroWebController):
         self.c = controller
 
     def get_dashboard_data(self):
         cfg = self.c.engine.config
         modes = cfg.get("modes", {})
         return {
-            "wake_phrase": cfg.get("wake_phrase", "hey jarvis"),
+            "wake_phrase": cfg.get("wake_phrase", "hey naitro"),
             "user_title": cfg.get("conversation", {}).get("user_title", "sir"),
             "allow_push": bool(cfg.get("reviewer", {}).get("allow_push", False)),
             "speak_responses": bool(cfg.get("voice", {}).get("speak_responses", True)),
@@ -300,4 +306,4 @@ class Api:
 
 
 if __name__ == "__main__":
-    JarvisWebController().start()
+    NaitroWebController().start()

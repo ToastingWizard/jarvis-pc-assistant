@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=JARVIS
-Comment=Local PC voice assistant
-Exec=/home/vishwamanava/Downloads/jarvis-pc-assistant-1.1.0/jarvis-launch.sh
-Icon=/home/vishwamanava/Downloads/jarvis-pc-assistant-1.1.0/jarvis-icon.png
-Terminal=false
-Categories=Utility;

@@ -1,13 +1,13 @@
-# Publishing JARVIS To GitHub
+# Publishing NaiTRO To GitHub
 
-Use these steps when you are ready to put JARVIS online.
+Use these steps when you are ready to put NaiTRO online.
 
 ## 1. Create A GitHub Repo
 
 Create a new empty repository on GitHub, for example:
 
 ```text
-jarvis-pc-assistant
+naitro-pc-assistant
 ```
 
 Do not add a README, license, or `.gitignore` on GitHub. This project already has them.
@@ -20,9 +20,9 @@ Run these commands from the project folder:
 git init
 git add .
 git status
-git commit -m "Initial JARVIS release"
+git commit -m "Initial NaiTRO release"
 git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/jarvis-pc-assistant.git
+git remote add origin https://github.com/YOUR_USERNAME/naitro-pc-assistant.git
 git push -u origin main
 ```
 
@@ -42,11 +42,11 @@ After pushing, open the repo on GitHub:
 1. Go to **Actions**.
 2. Choose **Build Windows EXE**.
 3. Click **Run workflow**.
-4. Download the `JARVIS-Windows` artifact when it finishes.
+4. Download the `NaiTRO-Windows` artifact when it finishes.
 
 ## 4. Create A Public Release
 
-To publish a proper release page with `JARVIS.exe`, push a version tag:
+To publish a proper release page with `NaiTRO.exe`, push a version tag:
 
 ```powershell
 git tag v1.0.0
@@ -58,6 +58,6 @@ The GitHub workflow will build the exe and attach it to a new release.
 ## Notes For Friends
 
 - Windows SmartScreen may warn them because the app is not code-signed.
-- They should keep `JARVIS.exe` in its own folder.
-- On first launch, JARVIS creates their own `config.json`.
+- They should keep `NaiTRO.exe` in its own folder.
+- On first launch, NaiTRO creates their own `config.json`.
 - They can add their own apps, websites, folders, and modes from the UI.

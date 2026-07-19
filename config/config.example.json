@@ -1,5 +1,5 @@
 {
-  "wake_phrase": "hey jarvis",
+  "wake_phrase": "hey naitro",
   "gemini_api_key": "",
   "voice": {
     "enabled": false,
@@ -25,7 +25,7 @@
   },
   "conversation": {
     "enabled": true,
-    "name": "JARVIS",
+    "name": "NaiTRO",
     "user_title": "sir",
     "style": "sharp, calm, witty, loyal but not sycophantic",
     "session_timeout_seconds": 600,
@@ -93,10 +93,10 @@
     ]
   },
   "projects": {
-    "jarvis": "."
+    "naitro": "."
   },
   "reviewer": {
-    "default_project": "jarvis",
+    "default_project": "naitro",
     "editor": "pycharm",
     "pycharm_exe": "",
     "allow_push": true,

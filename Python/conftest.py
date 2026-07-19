@@ -1,7 +1,7 @@
-"""Shared pytest fixtures for the JARVIS test suite.
+"""Shared pytest fixtures for the NaiTRO test suite.
 
-These tests exercise JarvisEngine directly (not the Tkinter JarvisUI),
-since JarvisEngine holds all the actual decision-making logic — wake
+These tests exercise NaitroEngine directly (not the Tkinter NaitroUI),
+since NaitroEngine holds all the actual decision-making logic — wake
 word / conversation gating, git push, and code review rules — and can
 be tested headlessly without a display.
 """
@@ -14,15 +14,15 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import JARVIS_app  # noqa: E402
+import naitro_app  # noqa: E402
 
 
 @pytest.fixture
 def engine(tmp_path):
-    """A JarvisEngine pointed at a throwaway config file, with TTS
+    """A NaitroEngine pointed at a throwaway config file, with TTS
     disabled so tests don't spawn real speech threads."""
     config_path = tmp_path / "config.json"
-    eng = JARVIS_app.JarvisEngine(config_path=config_path, log=lambda text: None)
+    eng = naitro_app.NaitroEngine(config_path=config_path, log=lambda text: None)
     eng.config["voice"]["speak_responses"] = False
     return eng
 
@@ -46,7 +46,7 @@ def git_repo(tmp_path):
 
 @pytest.fixture
 def engine_with_repo(engine, git_repo):
-    """An engine configured so the 'jarvis' project points at git_repo."""
-    engine.config["projects"] = {"jarvis": str(git_repo)}
-    engine.config["reviewer"]["default_project"] = "jarvis"
+    """An engine configured so the 'naitro' project points at git_repo."""
+    engine.config["projects"] = {"naitro": str(git_repo)}
+    engine.config["reviewer"]["default_project"] = "naitro"
     return engine

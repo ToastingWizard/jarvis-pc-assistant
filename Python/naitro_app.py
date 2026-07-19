@@ -42,13 +42,14 @@ if getattr(sys, 'frozen', False):
     # Running as compiled .exe
     APP_DIR = Path(sys.executable).resolve().parent
 else:
-    # Running as normal .py script
-    APP_DIR = Path(__file__).resolve().parent
+    # Running as normal .py script, now living in Python/ -- config/ is a
+    # sibling folder one level up, per the reorganized project structure.
+    APP_DIR = Path(__file__).resolve().parent.parent / "config"
 
 CONFIG_PATH = APP_DIR / "config.json"
 
 DEFAULT_CONFIG = {
-    "wake_phrase": "hey jarvis",
+    "wake_phrase": "hey naitro",
     "voice": {
         "enabled": False,
         "speak_responses": True,
@@ -69,7 +70,7 @@ DEFAULT_CONFIG = {
     },
     "conversation": {
         "enabled": True,
-        "name": "JARVIS",
+        "name": "NaiTRO",
         "user_title": "sir",
         "style": "calm, witty, loyal butler",
         "session_timeout_seconds": 600,
@@ -107,10 +108,10 @@ DEFAULT_CONFIG = {
         ],
     },
     "projects": {
-        "jarvis": ".",
+        "naitro": ".",
     },
     "reviewer": {
-        "default_project": "jarvis",
+        "default_project": "naitro",
         "editor": "pycharm",
         "pycharm_exe": "",
         "allow_push": False,
@@ -126,7 +127,7 @@ class ActionResult:
     ok: bool
     message: str
 
-class JarvisEngine:
+class NaitroEngine:
     def __init__(self, config_path=CONFIG_PATH, log=None):
         self.config_path = Path(config_path)
         self.log = log or (lambda text: None)
@@ -242,7 +243,7 @@ class JarvisEngine:
         threading.Thread(target=_worker, daemon=True).start()
 
     def respond(self, text):
-        self.log(f"JARVIS: {text}")
+        self.log(f"NaiTRO: {text}")
         self._speech_cooldown_until = max(self._speech_cooldown_until, time.time() + 1.5)
         if self.config.get("voice", {}).get("speak_responses", True):
             self._ensure_speech_worker()
@@ -277,8 +278,8 @@ class JarvisEngine:
             )
             await communicate.save(path)
 
-        temp_path = os.path.join(tempfile.gettempdir(), f"jarvis_tts_{uuid.uuid4().hex}.mp3")
-        alias = f"jarvis_tts_{uuid.uuid4().hex}"
+        temp_path = os.path.join(tempfile.gettempdir(), f"naitro_tts_{uuid.uuid4().hex}.mp3")
+        alias = f"naitro_tts_{uuid.uuid4().hex}"
         try:
             asyncio.run(_save_audio(temp_path))
             self.play_audio_file(temp_path, alias)
@@ -402,7 +403,7 @@ class JarvisEngine:
 
     def strip_wake_phrase(self, text):
         command = self.normalize(text)
-        wake = self.normalize(self.config.get("wake_phrase", "hey jarvis"))
+        wake = self.normalize(self.config.get("wake_phrase", "hey naitro"))
         command = self.repair_wake_mishear(command)
         # Exact strip
         if command.startswith(wake):
@@ -416,29 +417,29 @@ class JarvisEngine:
         return self.repair_command_mishear(command)
 
     def repair_wake_mishear(self, command):
-        wake = self.normalize(self.config.get("wake_phrase", "hey jarvis"))
+        wake = self.normalize(self.config.get("wake_phrase", "hey naitro"))
         aliases = (
             "hazardous", "hey hazardous", "hazard is", "hey hazard is",
-            "hey service", "service", "jarves", "jarvis", "travis",
+            "hey service", "service", "jarves", "naitro", "travis",
             "hey travis", "hey jarves", "hey jars", "javis", "hey javis",
-            "jarvis open", "hazardous open"
+            "naitro open", "hazardous open"
         )
         words = command.split()
         for alias in aliases:
             if command.startswith(alias):
                 rest = command[len(alias):].strip()
-                return f"hey jarvis {rest}".strip()
+                return f"hey naitro {rest}".strip()
 
         # Google sometimes returns a short phrase that sounds close but is not spelled close.
         for n in (2, 1):
             prefix = " ".join(words[:n])
             if prefix and difflib.SequenceMatcher(None, prefix, wake).ratio() > 0.55:
-                return f"hey jarvis {' '.join(words[n:])}".strip()
+                return f"hey naitro {' '.join(words[n:])}".strip()
         return command
 
     def repair_command_mishear(self, command):
         command = self.normalize(command)
-        command = re.sub(r"\b(shut\s*down|shutdown|exit|quit|close|power off|turn off|goodbye|bye)\s+jar\b", r"\1 jarvis", command)
+        command = re.sub(r"\b(shut\s*down|shutdown|exit|quit|close|power off|turn off|goodbye|bye)\s+jar\b", r"\1 naitro", command)
         command = re.sub(r"\b(start|load|wake up|stop|close|kill)\s+(ola|olama|llama)\b", r"\1 ollama", command)
         return command
 
@@ -691,7 +692,7 @@ class JarvisEngine:
 
  
     def find_website(self, query):
-        """The one place JARVIS talks to a search provider to resolve
+        """The one place NaiTRO talks to a search provider to resolve
         'open <something>' when it's not an app, saved website, or
         already-cached lookup. Swapping providers later (DuckDuckGo ->
         Bing/Brave/etc.) only means changing this function."""
@@ -917,7 +918,7 @@ class JarvisEngine:
         if any(p in norm for p in ("good night", "night", "going to sleep")):
             return self.respond(random.choice([f"Rest well, {title}.", f"Goodnight, {title}."]))
         if any(p in norm for p in ("who are you", "what are you", "your name")):
-            return self.respond(f"I am JARVIS - your personal PC assistant, {title}.")
+            return self.respond(f"I am NaiTRO - your personal PC assistant, {title}.")
         if any(p in norm for p in ("what can you do", "help", "commands")):
             return self.respond(f"I can open apps, websites, folders, play music, and run your custom modes, {title}. Try 'open Codex', 'play music', or 'study mode'.")
 
@@ -928,21 +929,21 @@ class JarvisEngine:
             def _ask_ai():
                 import json as _json, urllib.request as _req
                 system_prompt = (
-                    f"You are JARVIS, a sharp, witty, loyal personal AI assistant running on a Windows PC. "
+                    f"You are NaiTRO, a sharp, witty, loyal personal AI assistant running on a Windows PC. "
                     f"Personality: {style}. Address the user as '{title}'. "
                     f"You have knowledge of gaming, tech, and current trends. "
                     f"Be conversational, confident, never sycophantic. "
                     f"Keep responses to 1-3 sentences unless more detail is genuinely needed. "
                     f"Answer only the user's latest message. Do not invent extra User questions. "
-                    f"Do not write labels like User:, JARVIS:, Assistant:, or transcript examples."
+                    f"Do not write labels like User:, NaiTRO:, Assistant:, or transcript examples."
                 )
 
                 # Try Ollama first (local, no internet needed)
                 try:
                     payload = _json.dumps({
                         "model": "phi3:mini",
-                        "prompt": f"{system_prompt}\n\nUser: {text}\nJARVIS:",
-                        "options": {"stop": ["\nUser:", "\nJARVIS:", "\nAssistant:", "User:", "JARVIS:", "Assistant:"]},
+                        "prompt": f"{system_prompt}\n\nUser: {text}\nNaiTRO:",
+                        "options": {"stop": ["\nUser:", "\nNaiTRO:", "\nAssistant:", "User:", "NaiTRO:", "Assistant:"]},
                         "stream": False
                     }).encode("utf-8")
                     req = _req.Request(
@@ -997,7 +998,7 @@ class JarvisEngine:
         if any(p in norm for p in ("good night", "night", "going to sleep")):
             return self.respond(random.choice([f"Rest well, {title}.", f"Goodnight, {title}."]))
         if any(p in norm for p in ("who are you", "what are you", "your name")):
-            return self.respond(f"I am JARVIS — your personal PC assistant, {title}.")
+            return self.respond(f"I am NaiTRO — your personal PC assistant, {title}.")
         if any(p in norm for p in ("what can you do", "help", "commands")):
             return self.respond(f"I can open apps, websites, folders, and run your custom modes, {title}. Try 'open Discord', 'gaming mode', or 'search best GPU 2025'.")
 
@@ -1009,38 +1010,38 @@ class JarvisEngine:
 
     def clean_ai_reply(self, reply):
         reply = str(reply or "").strip()
-        for marker in ("\nUser:", "\nJARVIS:", "\nAssistant:", "\nHuman:", "\nAI:"):
+        for marker in ("\nUser:", "\nNaiTRO:", "\nAssistant:", "\nHuman:", "\nAI:"):
             if marker in reply:
                 reply = reply.split(marker, 1)[0].strip()
-        for prefix in ("JARVIS:", "Assistant:", "AI:", "User:", "Human:"):
+        for prefix in ("NaiTRO:", "Assistant:", "AI:", "User:", "Human:"):
             if reply.startswith(prefix):
                 reply = reply[len(prefix):].strip()
         return reply or "I am here, sir."
 
-    def was_addressed_to_jarvis(self, text):
+    def was_addressed_to_naitro(self, text):
         norm = self.repair_wake_mishear(self.normalize(text))
-        wake = self.normalize(self.config.get("wake_phrase", "hey jarvis"))
+        wake = self.normalize(self.config.get("wake_phrase", "hey naitro"))
         # Exact match
         if wake in norm:
             return True
-        # Fuzzy match — catches mishearings like "hay jarvis", "hey javis", "hazardous jarvis" etc
+        # Fuzzy match — catches mishearings like "hay naitro", "hey javis", "hazardous naitro" etc
         words = norm.split()
         for i in range(len(words)):
             chunk = " ".join(words[i:i+2])
             if difflib.SequenceMatcher(None, chunk, wake).ratio() > 0.7:
                 return True
-        # Also catch just "jarvis" alone
-        if "jarvis" in norm:
+        # Also catch just "naitro" alone
+        if "naitro" in norm:
             return True
         return False
 
     def is_conversation_window_open(self, conversation_active, last_interaction_time, now=None):
         """Whether the 'skip the wake word for a bit' follow-up window is
-        still open. This is the fix for JARVIS reacting to background
+        still open. This is the fix for NaiTRO reacting to background
         speech (e.g. singing) indefinitely: the window must expire based
         on conversation.session_timeout_seconds, and merely LOOKING like a
         command is not, by itself, enough to open or extend it — see
-        JarvisUI.voice_loop, which is the only caller of this in practice."""
+        NaitroUI.voice_loop, which is the only caller of this in practice."""
         if not conversation_active:
             return False
         now = time.time() if now is None else now
@@ -1093,15 +1094,15 @@ class JarvisEngine:
     def resolve_project(self, target=None):
         projects = self.config.get("projects", {})
         reviewer = self.config.get("reviewer", {})
-        key = self.normalize(target or "") or reviewer.get("default_project") or "jarvis"
+        key = self.normalize(target or "") or reviewer.get("default_project") or "naitro"
         if key in projects:
             raw_path = projects[key]
         elif target and Path(os.path.expandvars(os.path.expanduser(target))).exists():
             raw_path = target
             key = Path(raw_path).name
         else:
-            raw_path = projects.get(reviewer.get("default_project", "jarvis"), ".")
-            key = reviewer.get("default_project", "jarvis")
+            raw_path = projects.get(reviewer.get("default_project", "naitro"), ".")
+            key = reviewer.get("default_project", "naitro")
         path = Path(os.path.expandvars(os.path.expanduser(str(raw_path))))
         if not path.is_absolute():
             path = (APP_DIR / path).resolve()
@@ -1126,7 +1127,7 @@ class JarvisEngine:
             return ActionResult(False, "Project not found")
 
         try:
-            from jarvis_reviewer import changed_files_from_status, get_local_diff, query_ai_structured
+            from naitro_reviewer import changed_files_from_status, get_local_diff, query_ai_structured
         except Exception as error:
             self.respond(f"The reviewer module is not available, {title}.")
             self.log(f"Reviewer import error: {error}")
@@ -1449,17 +1450,17 @@ class JarvisEngine:
         self.respond(f"Git push failed for {key}, {title}. I logged the details.")
         return ActionResult(False, "Push failed")
 
-class JarvisUI:
+class NaitroUI:
     def __init__(self):
         self.root = Tk()
-        self.root.title("JARVIS Control Panel")
+        self.root.title("NaiTRO Control Panel")
         try:
             if getattr(sys, 'frozen', False):
                 # If running as EXE, look in the temp folder
-                icon_path = os.path.join(sys._MEIPASS, "JARVIS.ico")
+                icon_path = os.path.join(sys._MEIPASS, "NaiTRO.ico")
             else:
                 # If running as .py, look in the current folder
-                icon_path = "JARVIS.ico"
+                icon_path = "NaiTRO.ico"
 
             if os.path.exists(icon_path):
                 self.root.iconbitmap(icon_path)
@@ -1482,7 +1483,7 @@ class JarvisUI:
             "dark": "#1e1b4b",
         }
         
-        self.engine = JarvisEngine(log=self.enqueue_log)
+        self.engine = NaitroEngine(log=self.enqueue_log)
         self.events = queue.Queue()
         self.voice_running = False
         self.orb_angle = 0
@@ -1525,7 +1526,7 @@ class JarvisUI:
         self.sidebar = Frame(self.app_container, bg=self.colors["panel"], width=350, padx=20, pady=20)
         self.sidebar.pack_propagate(False)
         
-        Label(self.sidebar, text="JARVIS", font=("Consolas", 18, "bold"), fg=self.colors["accent"], bg=self.colors["panel"]).pack(anchor="w")
+        Label(self.sidebar, text="NaiTRO", font=("Consolas", 18, "bold"), fg=self.colors["accent"], bg=self.colors["panel"]).pack(anchor="w")
         Label(self.sidebar, text="Control center", font=("Consolas", 9), fg=self.colors["muted"], bg=self.colors["panel"]).pack(anchor="w", pady=(2, 18))
         
         tab_row = Frame(self.sidebar, bg=self.colors["panel"])
@@ -1638,8 +1639,8 @@ class JarvisUI:
         self.list_kind.set(kind)
         labels = {
             "apps": ("Apps", "Launchable app shortcuts."),
-            "websites": ("Websites", "Saved links JARVIS can open."),
-            "playlists": ("Playlists", "Spotify playlists JARVIS can play."),
+            "websites": ("Websites", "Saved links NaiTRO can open."),
+            "playlists": ("Playlists", "Spotify playlists NaiTRO can play."),
             "folders": ("Folders", "Saved folders on this PC."),
             "modes": ("Your Modes", "Saved routines you can run or edit."),
         }
@@ -1708,10 +1709,10 @@ class JarvisUI:
                 d.ellipse([16, 16, 48, 48], fill="#1e1b4b")
                 d.ellipse([24, 24, 40, 40], fill="#a855f7")
                 menu = pystray.Menu(
-                    pystray.MenuItem("Show JARVIS", lambda: self.root.after(0, self._show_window), default=True),
+                    pystray.MenuItem("Show NaiTRO", lambda: self.root.after(0, self._show_window), default=True),
                     pystray.MenuItem("Shut Down", lambda: self.root.after(0, self.shutdown)),
                 )
-                self.tray_icon = pystray.Icon("JARVIS", img, "JARVIS", menu)
+                self.tray_icon = pystray.Icon("NaiTRO", img, "NaiTRO", menu)
                 self.tray_icon.run()
             except Exception as e:
                 print(f"Tray not available: {e}")
@@ -1746,7 +1747,7 @@ class JarvisUI:
         greeting = "Good to see you, sir. What are we doing today?"
         self.engine.respond(greeting)
         # Note: we deliberately do NOT open a conversation window here.
-        # JARVIS should wait for the wake phrase before treating anything
+        # NaiTRO should wait for the wake phrase before treating anything
         # it hears as a command — otherwise background speech (singing,
         # TV, other people talking) gets picked up as if you were
         # addressing it. See voice_loop() for the wake/timeout logic.
@@ -1782,7 +1783,7 @@ class JarvisUI:
 
         self.enqueue_log(f"Heard options: {', '.join(alternatives[:3])}")
         for candidate in alternatives:
-            if self.engine.was_addressed_to_jarvis(candidate) or self.is_actionable_voice_command(candidate):
+            if self.engine.was_addressed_to_naitro(candidate) or self.is_actionable_voice_command(candidate):
                 return self.engine.repair_wake_mishear(candidate)
         return self.engine.repair_wake_mishear(alternatives[0])
 
@@ -1816,19 +1817,19 @@ class JarvisUI:
                             phrase_time_limit=float(voice.get("phrase_time_limit", 9)),
                         )
                         if self.engine.is_audio_output_active():
-                            self.enqueue_log("Ignored voice while JARVIS was speaking.")
+                            self.enqueue_log("Ignored voice while NaiTRO was speaking.")
                             continue
                         text = self.recognize_best_text(recognizer, audio, sr)
                         if not text:
                             continue
                         self.enqueue_log(f"Heard: {text}")
 
-                        addressed = self.engine.was_addressed_to_jarvis(text)
+                        addressed = self.engine.was_addressed_to_naitro(text)
 
                         # A follow-up "conversation window" lets you skip the
-                        # wake word for a little while after JARVIS was last
+                        # wake word for a little while after NaiTRO was last
                         # addressed. It must expire — otherwise, once opened
-                        # (e.g. right after "hey jarvis"), JARVIS keeps
+                        # (e.g. right after "hey naitro"), NaiTRO keeps
                         # treating *everything* it hears as a command
                         # forever, including song lyrics, other people
                         # talking, or the TV.
@@ -1839,12 +1840,12 @@ class JarvisUI:
                             self.conversation_active = False
                             self.enqueue_log("Conversation window timed out — say the wake word again.")
 
-                        # Only react if JARVIS was directly addressed, or
+                        # Only react if NaiTRO was directly addressed, or
                         # we're inside an already-open follow-up window.
                         # Note: a phrase merely *looking* like a command
                         # (e.g. "play" or "stop" appearing in a song lyric)
                         # is intentionally NOT enough on its own anymore —
-                        # that used to make JARVIS jump on background
+                        # that used to make NaiTRO jump on background
                         # speech/singing even when nobody was talking to it.
                         if addressed or window_open:
                             self.conversation_active = True
@@ -1922,16 +1923,16 @@ class JarvisUI:
         norm = self.engine.normalize(text)
         command = self.engine.strip_wake_phrase(norm)
         shutdown_phrases = {
-            "shut down jarvis", "shutdown jarvis", "exit jarvis", "quit jarvis",
-            "close jarvis", "power off jarvis", "turn off jarvis",
-            "goodbye jarvis", "bye jarvis",
+            "shut down naitro", "shutdown naitro", "exit naitro", "quit naitro",
+            "close naitro", "power off naitro", "turn off naitro",
+            "goodbye naitro", "bye naitro",
         }
         shutdown_commands = {
             "shut down", "shutdown", "exit", "quit", "close",
             "power off", "turn off", "goodbye", "bye",
-            "shut down jarvis", "shutdown jarvis", "exit jarvis", "quit jarvis",
-            "close jarvis", "power off jarvis", "turn off jarvis",
-            "goodbye jarvis", "bye jarvis",
+            "shut down naitro", "shutdown naitro", "exit naitro", "quit naitro",
+            "close naitro", "power off naitro", "turn off naitro",
+            "goodbye naitro", "bye naitro",
         }
         return norm in shutdown_phrases or command in shutdown_commands
 
@@ -1939,8 +1940,8 @@ class JarvisUI:
         norm = self.engine.normalize(text)
         command = self.engine.strip_wake_phrase(norm)
         show_phrases = {
-            "show jarvis", "open jarvis", "bring up jarvis", "show yourself",
-            "come back", "jarvis show", "jarvis open", "wake up jarvis",
+            "show naitro", "open naitro", "bring up naitro", "show yourself",
+            "come back", "naitro show", "naitro open", "wake up naitro",
         }
         show_commands = {
             "show yourself", "show", "come back", "wake up",
@@ -2035,7 +2036,7 @@ class ModeBuilder:
 
         Label(body, text="Create New Mode", bg=c["bg"], fg=c["accent"],
               font=("Consolas", 16, "bold")).pack(anchor="w")
-        Label(body, text="Pick apps, websites, playlists, or folders. JARVIS will run them all when you say the mode name.",
+        Label(body, text="Pick apps, websites, playlists, or folders. NaiTRO will run them all when you say the mode name.",
               bg=c["bg"], fg=c["muted"], font=("Consolas", 9)).pack(anchor="w", pady=(2, 14))
 
         name_row = Frame(body, bg=c["bg"])
@@ -2234,11 +2235,11 @@ _SINGLE_INSTANCE_SOCKET = None
 
 
 def acquire_single_instance_lock(port=47771):
-    """Stops a second JARVIS process from starting alongside one that's
+    """Stops a second NaiTRO process from starting alongside one that's
     already running. Two live processes means two engines, two
     microphone listeners, and two text-to-speech threads, all reacting
     to the same thing you say — that's what was causing websites to
-    open twice and JARVIS's voice to sound doubled. Returns True if this
+    open twice and NaiTRO's voice to sound doubled. Returns True if this
     is the only instance; False if another one already holds the lock."""
     global _SINGLE_INSTANCE_SOCKET
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -2254,7 +2255,7 @@ def acquire_single_instance_lock(port=47771):
 
 if __name__ == "__main__":
     if not acquire_single_instance_lock():
-        print("JARVIS is already running — not starting a second instance.")
+        print("NaiTRO is already running — not starting a second instance.")
         sys.exit(0)
 
     # Prefer the new web-based UI (webview_ui.py). Falls back to the
@@ -2262,9 +2263,9 @@ if __name__ == "__main__":
     # web/ assets aren't next to this file, so this never leaves you
     # with nothing running.
     try:
-        from webview_ui import JarvisWebController
-        JarvisWebController().start()
+        from webview_ui import NaitroWebController
+        NaitroWebController().start()
     except Exception as exc:
         print(f"Web UI unavailable ({exc}); falling back to the classic interface.")
-        JarvisUI().run()
+        NaitroUI().run()
 

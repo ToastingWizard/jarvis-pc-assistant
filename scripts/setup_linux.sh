@@ -1,5 +1,5 @@
 #!/bin/bash
-# setup_linux.sh — one-shot setup for JARVIS on Ubuntu/Debian.
+# setup_linux.sh — one-shot setup for NaiTRO on Ubuntu/Debian.
 #
 # Handles everything that pip alone can't:
 #   - system audio/mic libraries (PortAudio, Tk, ffmpeg)
@@ -26,7 +26,7 @@ sudo apt install -y \
 sudo apt install -y gir1.2-webkit2-4.1 2>/dev/null \
     || sudo apt install -y gir1.2-webkit2gtk-4.0 2>/dev/null \
     || echo "!! Could not find a WebKit GObject package automatically."\
-            " JARVIS will still run using its classic interface, but the"\
+            " NaiTRO will still run using its classic interface, but the"\
             " newer web UI needs one of: gir1.2-webkit2-4.1 or"\
             " gir1.2-webkit2gtk-4.0 -- search 'apt-cache search webkit2'"\
             " for the name on your release if you want the web UI too."
@@ -40,16 +40,16 @@ source venv/bin/activate
 echo ""
 echo "== Installing Python packages =="
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r docs/requirements.txt
 pip install pycairo PyGObject
 
 echo ""
 echo "== Done =="
-echo "Run JARVIS with:"
+echo "Run NaiTRO with:"
 echo "    source venv/bin/activate"
-echo "    python JARVIS_app.py"
+echo "    python Python/naitro_app.py"
 echo ""
 echo "If it prints 'Web UI unavailable (...)', the classic interface will"
-echo "still open and JARVIS will still work -- just without the newer"
+echo "still open and NaiTRO will still work -- just without the newer"
 echo "sidebar look. Re-run this script after checking the WebKit package"
 echo "name for your specific Ubuntu version if you want to fix that."

@@ -44,9 +44,32 @@ __pycache__/
 Thumbs.db
 .venv/
 voice_samples/
+.vs# Local user configuration
+config/config.json
+
+# Build outputs
+build/
+dist/
+*.spec.bak
+
+# Python cache and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Node / frontend build artifacts
+node_modules/
+web/react-ui/dist/
+package-lock.json
+
+# Logs and local editor files
+*.log
+voice_samples/
+.idea/
 .vscode/
-test_conversation_window.py
-test_push_confirmation.py
-test_review_safety.py
-test_website_finder.py
->>>>>>> 5fe6134 (Add web-based UI (webview_ui.py + web/) alongside classic Tkinter UI)
+
+# OS clutter
+Thumbs.db
+Desktop.ini

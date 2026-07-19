@@ -1,5 +1,5 @@
 /* ============================================================
-   JARVIS web UI — front-end logic.
+   NaiTRO web UI — front-end logic.
    Talks to Python through window.pywebview.api (see webview_ui.py).
    Falls back to a small in-browser mock if opened outside pywebview,
    so the UI can be previewed in a normal browser too.
@@ -8,7 +8,7 @@
 const hasApi = () => typeof window.pywebview !== "undefined" && window.pywebview.api;
 
 const mockConfig = {
-  wake_phrase: "hey jarvis",
+  wake_phrase: "hey naitro",
   user_title: "sir",
   allow_push: true,
   speak_responses: true,
@@ -130,7 +130,7 @@ async function runTile(kind, name, el) {
   el.style.transform = "scale(.94)";
   setTimeout(() => (el.style.transform = ""), 150);
   // The engine announces what it's doing via respond(), which arrives
-  // through window.jarvisLog — no need to push a message here too.
+  // through window.naitroLog — no need to push a message here too.
   await api("run_action", kind, name);
 }
 
@@ -192,7 +192,7 @@ async function loadDashboard() {
     });
   }
 
-  document.getElementById("wakePhraseSub").textContent = cfg.wake_phrase || "hey jarvis";
+  document.getElementById("wakePhraseSub").textContent = cfg.wake_phrase || "hey naitro";
   setToggle("toggleAllowPush", !!cfg.allow_push);
   setToggle("toggleSpeak", !!cfg.speak_responses);
 }
@@ -216,8 +216,8 @@ async function sendCommand() {
   const text = cmdInput.value.trim();
   if (!text) return;
   cmdInput.value = "";
-  // engine.run_command() logs both "YOU: ..." and "JARVIS: ..." lines
-  // itself, which stream in through window.jarvisLog — see below.
+  // engine.run_command() logs both "YOU: ..." and "NaiTRO: ..." lines
+  // itself, which stream in through window.naitroLog — see below.
   await api("send_command", text);
 }
 cmdSend.addEventListener("click", sendCommand);
@@ -258,7 +258,7 @@ function wireAdd(btnId, kind, label) {
     const target = prompt(`Target for "${name}" (path, URL, or command):`);
     if (target === null) return;
     const res = await api("add_item", kind, name, target);
-    if (res && res.message) pushLog("JARVIS", res.message);
+    if (res && res.message) pushLog("NaiTRO", res.message);
     loadDashboard();
   });
 }
@@ -286,12 +286,12 @@ setInterval(async () => {
 
 /* ---------------- bridge callback: Python -> JS log push ----------------
    engine.log() emits plain strings like "YOU: open chrome" or
-   "JARVIS: Opening chrome, sir." — split on the first ": " so they land
+   "NaiTRO: Opening chrome, sir." — split on the first ": " so they land
    in the feed with proper styling. Anything without that shape (stray
-   status/debug lines) is shown attributed to JARVIS. */
-window.jarvisLog = function (line) {
+   status/debug lines) is shown attributed to NaiTRO. */
+window.naitroLog = function (line) {
   const idx = line.indexOf(": ");
-  if (idx === -1) { pushLog("JARVIS", line); return; }
+  if (idx === -1) { pushLog("NaiTRO", line); return; }
   const who = line.slice(0, idx);
   const text = line.slice(idx + 2);
   pushLog(who === "YOU" ? "You" : who, text);

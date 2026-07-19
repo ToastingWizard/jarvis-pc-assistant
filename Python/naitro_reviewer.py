@@ -1,4 +1,4 @@
-"""AI-powered Git diff code review for JARVIS."""
+"""AI-powered Git diff code review for NaiTRO."""
 
 from __future__ import annotations
 

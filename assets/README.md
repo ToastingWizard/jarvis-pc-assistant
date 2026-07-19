@@ -1,10 +1,10 @@
-# JARVIS PC Assistant
+# NaiTRO PC Assistant
 
 A local PC voice assistant for launching apps, opening websites and folders, playing music, running custom modes, reviewing code, and having lightweight butler-style conversation. Windows is the main release target, and source mode also supports Linux.
 
 ## AI Setup (Required For Smart Responses)
 
-JARVIS can launch apps and automate tasks without AI.
+NaiTRO can launch apps and automate tasks without AI.
 
 For smart AI conversations, install Ollama and the Phi-3 Mini model:
 
@@ -20,7 +20,7 @@ ollama pull phi3:mini
 ## Features
 
 - Purple desktop control panel with a voice orb and mode shortcuts
-- Voice commands like `hey jarvis open chrome`, then natural follow-up commands
+- Voice commands like `hey naitro open chrome`, then natural follow-up commands
 - Custom apps, websites, Spotify playlists, folders, and multi-step modes
 - Text command box for testing without a microphone
 - Optional local AI conversation through Ollama
@@ -31,15 +31,15 @@ ollama pull phi3:mini
 
 ## Installation Guide
 
-The easiest way to share JARVIS is through GitHub Releases:
+The easiest way to share NaiTRO is through GitHub Releases:
 
 1. Push this project to GitHub.
 2. Go to the repository's **Actions** tab.
 3. Run **Build Windows EXE** manually, or push a version tag like `v1.0.0`.
-4. Download `JARVIS.exe` from the workflow artifact or the GitHub Release.
+4. Download `NaiTRO.exe` from the workflow artifact or the GitHub Release.
 5. Send friends the release link.
 
-When they launch the exe, JARVIS creates a fresh local `config.json` next to the exe. They can customize everything from the app.
+When they launch the exe, NaiTRO creates a fresh local `config.json` next to the exe. They can customize everything from the app.
 
 ## Run From Source
 
@@ -47,19 +47,19 @@ Install Python 3.10.x -3.13.x dont install 3.14.x cause speach recognition wont 
 
 ```powershell
 py -m pip install -r requirements.txt
-py JARVIS_app.py
+py naitro_app.py
 ```
 
 Or double-click:
 
 ```text
-run_jarvis.bat
+run_naitro.bat
 ```
 
 ### Linux Notes
 
 The easiest way to get set up on Ubuntu/Debian is the included setup script.
-It installs everything JARVIS needs -- audio libraries, and the GTK/WebKit
+It installs everything NaiTRO needs -- audio libraries, and the GTK/WebKit
 stack the web UI runs on -- and creates a Python 3.13 virtual environment
 (3.14 breaks voice recognition, so this matters):
 
@@ -68,14 +68,14 @@ chmod +x setup_linux.sh
 ./setup_linux.sh
 ```
 
-Then, every time you want to run JARVIS:
+Then, every time you want to run NaiTRO:
 
 ```bash
 source venv/bin/activate
-python JARVIS_app.py
+python naitro_app.py
 ```
 
-If it ever prints `Web UI unavailable (...)`, JARVIS still works fine using
+If it ever prints `Web UI unavailable (...)`, NaiTRO still works fine using
 its classic interface -- that message just means one of the system GTK/WebKit
 packages couldn't be installed automatically (the exact package name can
 vary between Ubuntu versions). The error message names what's missing if you
@@ -94,10 +94,10 @@ python3.13 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 pip install pycairo PyGObject
-python JARVIS_app.py
+python naitro_app.py
 ```
 
-On Linux, JARVIS uses `xdg-open` for links/folders and normal shell commands for apps. For custom apps, set the target to the Linux command, for example `google-chrome`, `spotify`, `pycharm`, or `/home/you/AppImageName.AppImage`.
+On Linux, NaiTRO uses `xdg-open` for links/folders and normal shell commands for apps. For custom apps, set the target to the Linux command, for example `google-chrome`, `spotify`, `pycharm`, or `/home/you/AppImageName.AppImage`.
 
 ## Build The EXE Locally
 
@@ -108,7 +108,7 @@ On Linux, JARVIS uses `xdg-open` for links/folders and normal shell commands for
 The finished app will be:
 
 ```text
-dist\JARVIS.exe
+dist\NaiTRO.exe
 ```
 
 ## Voice Setup Notes
@@ -121,7 +121,7 @@ pipwin install pyaudio
 python -m pip install -r requirements.txt
 ```
 
-For best recognition, use headphones or keep speaker volume low so JARVIS does not hear its own voice.
+For best recognition, use headphones or keep speaker volume low so NaiTRO does not hear its own voice.
 
 ## Personal Config
 
@@ -136,7 +136,7 @@ copy config.example.json config.json
 ## Commands
 
 ```text
-hey jarvis open chrome
+hey naitro open chrome
 open spotify
 play music
 play discover weekly playlist
@@ -157,7 +157,7 @@ stop ollama
 
 ## AI Code Review
 
-JARVIS can review local Git changes with Ollama (phi3:mini) or Gemini fallback.
+NaiTRO can review local Git changes with Ollama (phi3:mini) or Gemini fallback.
 
 Voice or text examples:
 
@@ -168,7 +168,7 @@ open first issue
 fix first issue
 ```
 
-`fix first issue` only applies safe automatic fixes, such as adding generated folders to `.gitignore`. If a finding needs judgment, JARVIS opens the exact file and line instead of guessing.
+`fix first issue` only applies safe automatic fixes, such as adding generated folders to `.gitignore`. If a finding needs judgment, NaiTRO opens the exact file and line instead of guessing.
 
 Config (`reviewer` in `config.json`):
 
@@ -176,8 +176,8 @@ Config (`reviewer` in `config.json`):
 - `merge_rule_findings`: combine AI with local secret and task-marker checks
 - `max_diff_chars`: cap diff size sent to the model
 - `ollama_model`: local model name (default `phi3:mini`)
-- `projects`: map friendly project names to folders, so commands like `review jarvis` know where to go
-- `allow_push`: lets JARVIS run `git push` only when the working tree is clean
+- `projects`: map friendly project names to folders, so commands like `review naitro` know where to go
+- `allow_push`: lets NaiTRO run `git push` only when the working tree is clean
 
 ## Custom Apps
 
@@ -201,7 +201,7 @@ Direct shortcut or executable:
 
 ## Music And Playlists
 
-JARVIS can open saved Spotify playlists or search for specific songs without needing a Spotify API key.
+NaiTRO can open saved Spotify playlists or search for specific songs without needing a Spotify API key.
 
 Saved playlist:
 
@@ -231,7 +231,7 @@ play song blinding lights
 play starboy on spotify
 ```
 
-For exact playlists, add the Spotify playlist URL in the JARVIS sidebar under **Playlists**.
+For exact playlists, add the Spotify playlist URL in the NaiTRO sidebar under **Playlists**.
 
 ## Custom Modes
 
@@ -255,4 +255,4 @@ Modes are routines made of apps, websites, playlists, folders, and delays:
 ]
 ```
 
-You can create modes directly in the JARVIS UI.
+You can create modes directly in the NaiTRO UI.

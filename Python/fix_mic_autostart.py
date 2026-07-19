@@ -1,7 +1,7 @@
 """
-fix_mic_autostart.py — one-time fix for JARVIS launching with the mic off.
+fix_mic_autostart.py — one-time fix for NaiTRO launching with the mic off.
 
-Run this once from your JARVIS project folder:
+Run this once from your NaiTRO project folder:
 
     python fix_mic_autostart.py
 
@@ -47,7 +47,7 @@ def main():
     else:
         for line in changed:
             print(line)
-        print("Restart JARVIS — the mic should now turn on automatically.")
+        print("Restart NaiTRO — the mic should now turn on automatically.")
 
 
 if __name__ == "__main__":
