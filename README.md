@@ -8,12 +8,11 @@ NaiTRO can launch apps and automate tasks without AI.
 
 For smart AI conversations, install Ollama and the Phi-3 Mini model:
 
-1. Install Ollama:
-https://ollama.com/download/windows
+1. Install Ollama: https://ollama.com/download/windows
 
 2. Open PowerShell and run:
 
-```powershell
+```
 ollama pull phi3:mini
 ```
 
@@ -28,6 +27,7 @@ ollama pull phi3:mini
 - Minimize-to-tray support
 - One-file Windows `.exe` build with PyInstaller
 - Linux source-mode support for launching apps, opening links/folders, voice, and code review
+- One-command Linux installer (`install.sh`) and automatic app discovery (`discover_apps.py`) -- see below
 
 ## Installation Guide
 
@@ -45,49 +45,49 @@ When they launch the exe, NaiTRO creates a fresh local `config.json` next to the
 
 Install Python 3.10.x -3.13.x dont install 3.14.x cause speach recognition wont work from [python.org](https://www.python.org/downloads/windows/) and enable **Add python.exe to PATH**.
 
-```powershell
+```
 py -m pip install -r requirements.txt
 py naitro_app.py
 ```
 
 Or double-click:
 
-```text
+```
 run_naitro.bat
 ```
 
-### Linux Notes
+### Linux Setup (Recommended: One Command)
 
-The easiest way to get set up on Ubuntu/Debian is the included setup script.
-It installs everything NaiTRO needs -- audio libraries, and the GTK/WebKit
-stack the web UI runs on -- and creates a Python 3.13 virtual environment
-(3.14 breaks voice recognition, so this matters):
+New to Linux, or just want this working with the least hassle? Run the installer -- it's the only thing you need to do by hand:
 
-```bash
-chmod +x setup_linux.sh
-./setup_linux.sh
+```
+chmod +x install.sh
+./install.sh
 ```
 
-Then, every time you want to run NaiTRO:
+That's it. This one script:
 
-```bash
-source venv/bin/activate
-python naitro_app.py
+- Detects your distro (Ubuntu/Debian, Fedora, or Arch) and installs every system package NaiTRO needs -- audio libraries (PortAudio, espeak-ng, ffmpeg), the GTK/WebKit stack the web UI runs on, and the build tools needed for the GTK Python bindings.
+- Creates a Python 3.13 virtual environment specifically (**not** 3.14 -- SpeechRecognition doesn't support it yet).
+- Installs every Python package NaiTRO needs, including Playwright + a real Chromium build for it.
+- Creates a working desktop icon (`NaiTRO` in your applications menu) and a `naitro-launch.sh` script.
+
+It's safe to re-run any time -- for example, after moving the project folder to a new location (a venv breaks if you move it, since it bakes in absolute paths; re-running `install.sh` rebuilds it correctly for wherever the project lives now).
+
+Once it finishes, either click the **NaiTRO** icon in your applications menu, or launch it from the terminal:
+
+```
+./naitro-launch.sh
 ```
 
-If it ever prints `Web UI unavailable (...)`, NaiTRO still works fine using
-its classic interface -- that message just means one of the system GTK/WebKit
-packages couldn't be installed automatically (the exact package name can
-vary between Ubuntu versions). The error message names what's missing if you
-want to track it down; search `apt-cache search webkit2` for the matching
-package name on your release.
+If it ever prints `Web UI unavailable (...)`, NaiTRO still works fine using its classic interface -- that message just means one of the system GTK/WebKit packages couldn't be installed automatically (the exact package name can vary between Ubuntu versions). The error message names what's missing if you want to track it down.
 
 **Doing it manually instead of the script:**
 
-```bash
+```
 sudo apt update
 sudo apt install python3.13 python3.13-venv python3.13-dev \
-    portaudio19-dev python3-tk ffmpeg \
+    portaudio19-dev python3-tk ffmpeg espeak-ng \
     python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-webkit2-4.1 \
     libgirepository-2.0-dev gir1.2-girepository-2.0 libcairo2-dev pkg-config gcc
 python3.13 -m venv venv
@@ -99,15 +99,41 @@ python naitro_app.py
 
 On Linux, NaiTRO uses `xdg-open` for links/folders and normal shell commands for apps. For custom apps, set the target to the Linux command, for example `google-chrome`, `spotify`, `pycharm`, or `/home/you/AppImageName.AppImage`.
 
+### Link All Your Installed Apps Automatically
+
+Instead of typing in each app you want NaiTRO to know about by hand, `discover_apps.py` scans your system's own app registry (the same `.desktop` files that populate your applications menu -- covers apt/dnf/pacman packages, Flatpak, and Snap) and adds every app it finds to your config automatically.
+
+See what it would add first, without changing anything:
+
+```
+python3 Python/discover_apps.py --dry-run
+```
+
+Then run it for real:
+
+```
+python3 Python/discover_apps.py
+```
+
+It only **adds** apps that aren't already in your config -- it never overwrites anything you've already set up by hand, and never touches any other part of `config.json` (your API key, voice settings, etc. are left completely alone). Safe to re-run any time you install something new; it'll just pick up whatever's new since the last run.
+
+Once it's done, just talk to NaiTRO like normal:
+
+```
+hey naitro open <app name>
+```
+
+Note: this only picks up GUI apps with a proper `.desktop` entry -- which is effectively everything in your applications menu. A command-line-only tool with no menu entry needs to be added to `config.json` by hand instead.
+
 ## Build The EXE Locally
 
-```powershell
+```
 .\build_windows.ps1
 ```
 
 The finished app will be:
 
-```text
+```
 dist\NaiTRO.exe
 ```
 
@@ -115,7 +141,7 @@ dist\NaiTRO.exe
 
 Voice input uses `SpeechRecognition` and `PyAudio`. If PyAudio refuses to install on Windows, try:
 
-```powershell
+```
 python -m pip install pipwin
 pipwin install pyaudio
 python -m pip install -r requirements.txt
@@ -129,13 +155,13 @@ Do not commit your real `config.json`. It can contain personal Windows paths, mi
 
 If you want to reset your local setup:
 
-```powershell
+```
 copy config.example.json config.json
 ```
 
 ## Commands
 
-```text
+```
 hey naitro open chrome
 open spotify
 play music
@@ -161,7 +187,7 @@ NaiTRO can review local Git changes with Ollama (phi3:mini) or Gemini fallback.
 
 Voice or text examples:
 
-```text
+```
 review code
 review my changes
 open first issue
@@ -183,7 +209,7 @@ Config (`reviewer` in `config.json`):
 
 Command-based app:
 
-```json
+```
 "chrome": {
   "type": "command",
   "target": "chrome"
@@ -192,7 +218,7 @@ Command-based app:
 
 Direct shortcut or executable:
 
-```json
+```
 "my app": {
   "type": "path",
   "target": "C:\\Path\\To\\App.lnk"
@@ -205,7 +231,7 @@ NaiTRO can open saved Spotify playlists or search for specific songs without nee
 
 Saved playlist:
 
-```json
+```
 "playlists": {
   "chill": "https://open.spotify.com/playlist/YOUR_PLAYLIST_ID",
   "liked songs": "spotify:collection:tracks"
@@ -214,7 +240,7 @@ Saved playlist:
 
 Music settings:
 
-```json
+```
 "music": {
   "service": "spotify",
   "default_playlist": "liked songs"
@@ -223,7 +249,7 @@ Music settings:
 
 Voice examples:
 
-```text
+```
 play music
 play chill playlist
 play playlist discover weekly
@@ -237,7 +263,7 @@ For exact playlists, add the Spotify playlist URL in the NaiTRO sidebar under **
 
 Modes are routines made of apps, websites, playlists, folders, and delays:
 
-```json
+```
 "chill mode": [
   {
     "type": "app",
@@ -256,3 +282,7 @@ Modes are routines made of apps, websites, playlists, folders, and delays:
 ```
 
 You can create modes directly in the NaiTRO UI.
+
+## About
+
+A personal AI assistant inspired by J.A.R.V.I.S. is built for automation, voice and text interaction, and smart task handling. It is designed for learning and experimenting with AI, APIs, and Python. This assistant can be customized to grow with new features and integrations.

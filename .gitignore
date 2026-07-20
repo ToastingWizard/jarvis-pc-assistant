@@ -1,33 +1,11 @@
+
 <<<<<<< HEAD
-# Local user configuration
-config.json
-
-# Build outputs
-build/
-dist/
-*.spec.bak
-
-# Python cache and virtual environments
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-env/
-
-# Logs and local editor files
-*.log
-voice_samples/
-.idea/
-.vscode/
-
-# OS clutter
-Thumbs.db
-Desktop.ini
 =======
-
 build/
 # Build outputs
+config/config.json
 config.json
+config/known_restaurants.json
 Desktop.ini
 dist/
 env/
@@ -35,42 +13,19 @@ env/
 # Local user configuration
 *.log
 # Logs and local editor files
+# Node / frontend build artifacts
+node_modules/
 # OS clutter
+package-lock.json
 *.pyc
 __pycache__/
 *.py[cod]
 # Python cache and virtual environments
-*.spec.bak
-Thumbs.db
-.venv/
-voice_samples/
-.vs# Local user configuration
-config/config.json
-
-# Build outputs
-build/
-dist/
-*.spec.bak
-
-# Python cache and virtual environments
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-env/
-
-# Node / frontend build artifacts
-node_modules/
-web/react-ui/dist/
-package-lock.json
-
-# Logs and local editor files
-*.log
-voice_samples/
-.idea/
-.vscode/
-
-# OS clutter
-Thumbs.db
-Desktop.ini
 Python/reservation_demo.py
+*.spec.bak
+Thumbs.db
+.venv/
+voice_samples/
+.vscode/
+.vs# Local user configuration
+web/react-ui/dist/
