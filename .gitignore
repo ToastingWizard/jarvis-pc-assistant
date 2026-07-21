@@ -1,31 +1,33 @@
-
-<<<<<<< HEAD
-=======
-build/
 # Build outputs
+build/
+dist/
+web/react-ui/dist/
+node_modules/
+package-lock.json
+
+# Personal config
 config/config.json
 config.json
 config/known_restaurants.json
-Desktop.ini
-dist/
-env/
-.idea/
-# Local user configuration
-*.log
-# Logs and local editor files
-# Node / frontend build artifacts
-node_modules/
-# OS clutter
-package-lock.json
-*.pyc
+
+# Python cache and virtual environments
 __pycache__/
 *.py[cod]
-# Python cache and virtual environments
-Python/reservation_demo.py
 *.spec.bak
-Thumbs.db
+env/
 .venv/
-voice_samples/
+venv/
+
+# Editors / OS clutter
+.idea/
 .vscode/
-.vs# Local user configuration
-web/react-ui/dist/
+.vs/
+Desktop.ini
+Thumbs.db
+
+# Logs and local debug output
+*.log
+
+# Local-only files
+Python/reservation_demo.py
+voice_samples/

@@ -2,19 +2,35 @@
 
 A local PC voice assistant for launching apps, opening websites and folders, playing music, running custom modes, reviewing code, and having lightweight butler-style conversation. Windows is the main release target, and source mode also supports Linux.
 
-## AI Setup (Required For Smart Responses)
+## Download NaiTRO (Windows, No Setup)
+
+The easiest way to get NaiTRO:
+
+1. Go to the [**Releases**](https://github.com/ToastingWizard/NaiTRO/releases) page.
+2. Download `NaiTRO.exe` from the latest release.
+3. **Install the Microsoft Edge WebView2 Runtime** if you don't already have it — NaiTRO's UI is built on it, and the app won't display without it. Most Windows 11 and up-to-date Windows 10 machines already have this, but if you get a blank window or a crash on launch, install it:
+
+   ```powershell
+   winget install Microsoft.EdgeWebView2Runtime
+   ```
+
+   Or download it directly: https://developer.microsoft.com/en-us/microsoft-edge/webview2/
+4. Run `NaiTRO.exe`. On first launch it creates a local `config.json` next to the exe — you can customize everything from the app itself.
+
+No Python, Node, or other dev tools are required to just run the exe.
+
+## AI Setup (Optional, For Smart Responses)
 
 NaiTRO can launch apps and automate tasks without AI.
 
 For smart AI conversations, install Ollama and the Phi-3 Mini model:
 
 1. Install Ollama: https://ollama.com/download/windows
-
 2. Open PowerShell and run:
 
-```
-ollama pull phi3:mini
-```
+   ```powershell
+   ollama pull phi3:mini
+   ```
 
 ## Features
 
@@ -27,25 +43,13 @@ ollama pull phi3:mini
 - Minimize-to-tray support
 - One-file Windows `.exe` build with PyInstaller
 - Linux source-mode support for launching apps, opening links/folders, voice, and code review
-- One-command Linux installer (`install.sh`) and automatic app discovery (`discover_apps.py`) -- see below
+- One-command Linux installer (`install.sh`) and automatic app discovery (`discover_apps.py`) — see below
 
-## Installation Guide
+## Run From Source (Windows)
 
-The easiest way to share NaiTRO is through GitHub Releases:
+Install Python 3.10–3.13 (not 3.14 — SpeechRecognition doesn't support it yet) from [python.org](https://www.python.org/downloads/windows/) and enable **Add python.exe to PATH**.
 
-1. Push this project to GitHub.
-2. Go to the repository's **Actions** tab.
-3. Run **Build Windows EXE** manually, or push a version tag like `v1.0.0`.
-4. Download `NaiTRO.exe` from the workflow artifact or the GitHub Release.
-5. Send friends the release link.
-
-When they launch the exe, NaiTRO creates a fresh local `config.json` next to the exe. They can customize everything from the app.
-
-## Run From Source
-
-Install Python 3.10.x -3.13.x dont install 3.14.x cause speach recognition wont work from [python.org](https://www.python.org/downloads/windows/) and enable **Add python.exe to PATH**.
-
-```
+```powershell
 py -m pip install -r requirements.txt
 py naitro_app.py
 ```
@@ -56,35 +60,37 @@ Or double-click:
 run_naitro.bat
 ```
 
+The web control panel requires the React UI to be built once beforehand — see [Build The EXE Locally](#build-the-exe-locally) below for the build command; it's needed for source mode too.
+
 ### Linux Setup (Recommended: One Command)
 
-New to Linux, or just want this working with the least hassle? Run the installer -- it's the only thing you need to do by hand:
+New to Linux, or just want this working with the least hassle? Run the installer — it's the only thing you need to do by hand:
 
-```
+```bash
 chmod +x install.sh
 ./install.sh
 ```
 
 That's it. This one script:
 
-- Detects your distro (Ubuntu/Debian, Fedora, or Arch) and installs every system package NaiTRO needs -- audio libraries (PortAudio, espeak-ng, ffmpeg), the GTK/WebKit stack the web UI runs on, and the build tools needed for the GTK Python bindings.
-- Creates a Python 3.13 virtual environment specifically (**not** 3.14 -- SpeechRecognition doesn't support it yet).
+- Detects your distro (Ubuntu/Debian, Fedora, or Arch) and installs every system package NaiTRO needs — audio libraries (PortAudio, espeak-ng, ffmpeg), the GTK/WebKit stack the web UI runs on, and the build tools needed for the GTK Python bindings.
+- Creates a Python 3.13 virtual environment specifically (**not** 3.14 — SpeechRecognition doesn't support it yet).
 - Installs every Python package NaiTRO needs, including Playwright + a real Chromium build for it.
 - Creates a working desktop icon (`NaiTRO` in your applications menu) and a `naitro-launch.sh` script.
 
-It's safe to re-run any time -- for example, after moving the project folder to a new location (a venv breaks if you move it, since it bakes in absolute paths; re-running `install.sh` rebuilds it correctly for wherever the project lives now).
+It's safe to re-run any time — for example, after moving the project folder to a new location (a venv breaks if you move it, since it bakes in absolute paths; re-running `install.sh` rebuilds it correctly for wherever the project lives now).
 
 Once it finishes, either click the **NaiTRO** icon in your applications menu, or launch it from the terminal:
 
-```
+```bash
 ./naitro-launch.sh
 ```
 
-If it ever prints `Web UI unavailable (...)`, NaiTRO still works fine using its classic interface -- that message just means one of the system GTK/WebKit packages couldn't be installed automatically (the exact package name can vary between Ubuntu versions). The error message names what's missing if you want to track it down.
+If it ever prints `Web UI unavailable (...)`, NaiTRO still works fine using its classic interface — that message just means one of the system GTK/WebKit packages couldn't be installed automatically (the exact package name can vary between Ubuntu versions). The error message names what's missing if you want to track it down.
 
 **Doing it manually instead of the script:**
 
-```
+```bash
 sudo apt update
 sudo apt install python3.13 python3.13-venv python3.13-dev \
     portaudio19-dev python3-tk ffmpeg espeak-ng \
@@ -101,21 +107,21 @@ On Linux, NaiTRO uses `xdg-open` for links/folders and normal shell commands for
 
 ### Link All Your Installed Apps Automatically
 
-Instead of typing in each app you want NaiTRO to know about by hand, `discover_apps.py` scans your system's own app registry (the same `.desktop` files that populate your applications menu -- covers apt/dnf/pacman packages, Flatpak, and Snap) and adds every app it finds to your config automatically.
+Instead of typing in each app you want NaiTRO to know about by hand, `discover_apps.py` scans your system's own app registry (the same `.desktop` files that populate your applications menu — covers apt/dnf/pacman packages, Flatpak, and Snap) and adds every app it finds to your config automatically.
 
 See what it would add first, without changing anything:
 
-```
+```bash
 python3 Python/discover_apps.py --dry-run
 ```
 
 Then run it for real:
 
-```
+```bash
 python3 Python/discover_apps.py
 ```
 
-It only **adds** apps that aren't already in your config -- it never overwrites anything you've already set up by hand, and never touches any other part of `config.json` (your API key, voice settings, etc. are left completely alone). Safe to re-run any time you install something new; it'll just pick up whatever's new since the last run.
+It only **adds** apps that aren't already in your config — it never overwrites anything you've already set up by hand, and never touches any other part of `config.json` (your API key, voice settings, etc. are left completely alone). Safe to re-run any time you install something new; it'll just pick up whatever's new since the last run.
 
 Once it's done, just talk to NaiTRO like normal:
 
@@ -123,12 +129,29 @@ Once it's done, just talk to NaiTRO like normal:
 hey naitro open <app name>
 ```
 
-Note: this only picks up GUI apps with a proper `.desktop` entry -- which is effectively everything in your applications menu. A command-line-only tool with no menu entry needs to be added to `config.json` by hand instead.
+Note: this only picks up GUI apps with a proper `.desktop` entry — which is effectively everything in your applications menu. A command-line-only tool with no menu entry needs to be added to `config.json` by hand instead.
 
 ## Build The EXE Locally
 
+The React UI has to be built once before packaging, since `NaiTRO.spec` bundles its output:
+
+```powershell
+cd web\react-ui
+npm install
+npm run build
+cd ..\..
 ```
+
+Then build the exe:
+
+```powershell
 .\build_windows.ps1
+```
+
+Or directly with PyInstaller:
+
+```powershell
+pyinstaller NaiTRO.spec --clean
 ```
 
 The finished app will be:
@@ -137,11 +160,29 @@ The finished app will be:
 dist\NaiTRO.exe
 ```
 
+If you rebuild after changing anything under `web/react-ui/`, re-run `npm run build` first — otherwise PyInstaller will bundle the old UI.
+
+## Publishing A New Release
+
+Pushing to `main` or a version tag automatically builds `NaiTRO.exe` via GitHub Actions (`.github/workflows/build-windows.yml`) and, for tags, publishes it as a GitHub Release.
+
+```bash
+git add .
+git commit -m "Fix packaging and blank-window issues"
+git push origin main
+
+# To cut an actual downloadable release:
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+Once the tag is pushed, check the repo's **Actions** tab for build progress. When it finishes, `NaiTRO.exe` appears under the new release on the **Releases** page, ready to share.
+
 ## Voice Setup Notes
 
 Voice input uses `SpeechRecognition` and `PyAudio`. If PyAudio refuses to install on Windows, try:
 
-```
+```powershell
 python -m pip install pipwin
 pipwin install pyaudio
 python -m pip install -r requirements.txt
@@ -155,7 +196,7 @@ Do not commit your real `config.json`. It can contain personal Windows paths, mi
 
 If you want to reset your local setup:
 
-```
+```powershell
 copy config.example.json config.json
 ```
 
@@ -209,7 +250,7 @@ Config (`reviewer` in `config.json`):
 
 Command-based app:
 
-```
+```json
 "chrome": {
   "type": "command",
   "target": "chrome"
@@ -218,7 +259,7 @@ Command-based app:
 
 Direct shortcut or executable:
 
-```
+```json
 "my app": {
   "type": "path",
   "target": "C:\\Path\\To\\App.lnk"
@@ -231,7 +272,7 @@ NaiTRO can open saved Spotify playlists or search for specific songs without nee
 
 Saved playlist:
 
-```
+```json
 "playlists": {
   "chill": "https://open.spotify.com/playlist/YOUR_PLAYLIST_ID",
   "liked songs": "spotify:collection:tracks"
@@ -240,7 +281,7 @@ Saved playlist:
 
 Music settings:
 
-```
+```json
 "music": {
   "service": "spotify",
   "default_playlist": "liked songs"
@@ -263,7 +304,7 @@ For exact playlists, add the Spotify playlist URL in the NaiTRO sidebar under **
 
 Modes are routines made of apps, websites, playlists, folders, and delays:
 
-```
+```json
 "chill mode": [
   {
     "type": "app",
@@ -282,6 +323,12 @@ Modes are routines made of apps, websites, playlists, folders, and delays:
 ```
 
 You can create modes directly in the NaiTRO UI.
+
+## Troubleshooting
+
+- **Blank window, or the exe closes immediately with no error**: install/update the WebView2 Runtime — see [Download NaiTRO](#download-naitro-windows-no-setup) above. This is the most common cause of NaiTRO appearing to "not open."
+- **A terminal window opens behind the app**: you're running a debug build (`console=True` in `NaiTRO.spec`). Official releases are built with `console=False`; rebuild locally with that setting if you want a debug console back temporarily.
+- **`naitro.exe` from Windows Search opens the wrong thing**: this usually means an old copy or an unrelated package's console-script stub is being matched first. Pin a shortcut to your real `dist\NaiTRO.exe` to Start, and remove/rename old project folders so search stops surfacing them.
 
 ## About
 
