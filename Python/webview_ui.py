@@ -3,8 +3,11 @@ webview_ui.py — NaiTRO's web-based control panel.
 """
 from __future__ import annotations
 
+
 import dataclasses
+import json
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -13,8 +16,36 @@ import webview
 
 from naitro_app import ActionResult, CONFIG_PATH, NaitroEngine
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent  # Python/ -> project root
-WEB_INDEX = PROJECT_ROOT / "web" / "react-ui" / "dist" / "index.html"
+
+def resource_root() -> Path:
+    """Project root in source mode; PyInstaller extract dir when frozen."""
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parent.parent
+
+
+def web_index_path() -> Path:
+    return resource_root() / "web" / "react-ui" / "dist" / "index.html"
+
+
+# #region agent log
+def _agent_log(location: str, message: str, data: dict, hypothesis_id: str) -> None:
+    try:
+        log_path = Path.cwd() / "debug-0b3274.log"
+        payload = {
+            "sessionId": "0b3274",
+            "location": location,
+            "message": message,
+            "data": data,
+            "hypothesisId": hypothesis_id,
+            "timestamp": int(time.time() * 1000),
+            "runId": os.environ.get("NAITRO_DEBUG_RUN", "runtime"),
+        }
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload) + "\n")
+    except Exception:
+        pass
+# #endregion
 
 
 def _result_dict(result: ActionResult) -> dict:
@@ -34,15 +65,31 @@ class NaitroWebController:
         self.last_interaction_time = 0.0
 
     def start(self):
-        if not WEB_INDEX.exists():
+        web_index = web_index_path()
+        frozen = getattr(sys, "frozen", False)
+        # #region agent log
+        _agent_log(
+            "webview_ui.py:start",
+            "Resolving React UI path",
+            {
+                "frozen": frozen,
+                "resource_root": str(resource_root()),
+                "web_index": str(web_index),
+                "exists": web_index.is_file(),
+                "meipass": getattr(sys, "_MEIPASS", None),
+            },
+            "H1",
+        )
+        # #endregion
+        if not web_index.is_file():
             raise FileNotFoundError(
-                f"React UI build not found at {WEB_INDEX}. "
+                f"React UI build not found at {web_index}. "
                 f"Run: cd web/react-ui && npm install && npm run build"
             )
         api = Api(self)
         self.window = webview.create_window(
             "NaiTRO",
-            url=str(WEB_INDEX),
+            url=web_index.resolve().as_uri(),
             js_api=api,
             width=1180,
             height=760,

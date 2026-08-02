@@ -127,6 +127,23 @@ class ActionResult:
     ok: bool
     message: str
 
+# Signals used by is_suspicious_url() to flag a freshly *discovered*
+# website (one found via find_website's live search, never opened
+# before) before it's ever auto-opened or saved. None of these prove a
+# site is malicious on their own, but any one of them is enough reason
+# to ask "are you sure?" instead of silently opening it -- see
+# open_target()'s find_website branch and handle_pending_confirmation's
+# "open_url" case for how the confirmation itself works.
+SUSPICIOUS_TLDS = {
+    "zip", "mov", "top", "click", "country", "gq", "tk", "ml", "cf",
+    "ga", "work", "support", "loan", "download", "review", "kim",
+    "men", "party", "date", "stream", "science",
+}
+URL_SHORTENERS = {
+    "bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly", "is.gd",
+    "buff.ly", "rebrand.ly", "cutt.ly", "shorturl.at",
+}
+
 class NaitroEngine:
     def __init__(self, config_path=CONFIG_PATH, log=None):
         self.config_path = Path(config_path)
@@ -143,6 +160,35 @@ class NaitroEngine:
 
     def is_windows(self):
         return os.name == "nt"
+
+    def is_suspicious_url(self, url):
+        """Heuristic-only check for a freshly *discovered* website (see
+        SUSPICIOUS_TLDS/URL_SHORTENERS above) -- not a real reputation
+        service, just enough to catch the obvious red flags (raw IP
+        addresses, punycode/homograph domains, link shorteners that hide
+        the real destination, throwaway TLDs commonly abused for
+        phishing/malware) before find_website's search result gets
+        auto-opened. Saved websites and anything already in
+        website_cache never pass through here -- only a brand-new
+        search result does."""
+        try:
+            host = (urllib.parse.urlparse(url).hostname or "").lower()
+        except Exception:
+            return True
+        if not host:
+            return True
+        if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", host):
+            return True  # raw IP, no real domain at all
+        if host.startswith("xn--") or ".xn--" in host:
+            return True  # punycode -- classic homograph-attack pattern
+        if host in URL_SHORTENERS:
+            return True  # can't tell where this actually leads
+        tld = host.rsplit(".", 1)[-1]
+        if tld in SUSPICIOUS_TLDS:
+            return True
+        if host.count("-") >= 4:
+            return True  # heavily hyphenated, typosquat-style domain
+        return False
 
     def quiet_subprocess_kwargs(self):
         if self.is_windows() and hasattr(subprocess, "CREATE_NO_WINDOW"):
@@ -380,6 +426,8 @@ class NaitroEngine:
                 return self.run_mode(target)
             if action == "close":
                 return self.close_app(target)
+            if action in ("focus", "minimize", "maximize", "restore"):
+                return self.control_window(action, target)
             if action == "open":
                 targets = self.split_multi_targets(target)
                 if len(targets) > 1:
@@ -454,6 +502,19 @@ class NaitroEngine:
         for prefix in mode_prefixes:
             if command.startswith(prefix):
                 return "mode", command[len(prefix):].strip()
+
+        # Desktop window control (see focus_window/minimize_window/etc.
+        # below) -- distinct from "close X" above, which kills the whole
+        # process rather than just managing its window.
+        window_actions = {
+            "focus ": "focus", "switch to ": "focus", "show me ": "focus",
+            "minimize ": "minimize", "minimise ": "minimize",
+            "maximize ": "maximize", "maximise ": "maximize",
+            "restore ": "restore", "unminimize ": "restore",
+        }
+        for prefix, action in window_actions.items():
+            if command.startswith(prefix):
+                return action, command[len(prefix):].strip()
 
  
 
@@ -676,8 +737,25 @@ class NaitroEngine:
         # to a search provider.
         found = self.find_website(name)
         if found:
-            self.config.setdefault("website_cache", {})[name] = found
-            self.save_config()
+            if self.is_suspicious_url(found):
+                # Never auto-open a first-time result that trips the
+                # heuristic checks -- arm a confirmation instead, same
+                # pattern as push_project(). Nothing is cached or opened
+                # until the user explicitly says yes.
+                self.pending_confirmation = {
+                    "type": "open_url",
+                    "name": name,
+                    "url": found,
+                    "expires": time.time() + self.CONFIRMATION_TIMEOUT_SECONDS,
+                }
+                if announce:
+                    self.respond(
+                        f"I found {name} at {found}, sir, but it looks unusual and "
+                        f"I'm not fully confident it's safe. Say 'confirm open' to "
+                        f"continue anyway, or 'cancel' to skip it."
+                    )
+                return ActionResult(True, "Awaiting open confirmation")
+            self._remember_website(name, found)
             if announce:
                 self.respond(f"Found {name}, sir. Opening it now.")
             self.open_url(found)
@@ -689,6 +767,17 @@ class NaitroEngine:
         if announce:
             self.respond(f"I couldn't find an official site for {name}, sir. Let me pull up a search instead.")
         return self.search_web(name)
+
+    def _remember_website(self, name, url):
+        """Saves a newly-confirmed-safe discovered website so the next
+        'open X' is instant (website_cache), and also mirrors it into
+        the regular 'websites' config -- the same list the dashboard UI
+        already displays -- so it shows up there automatically with no
+        separate UI code needed."""
+        self.config.setdefault("website_cache", {})[name] = url
+        self.config.setdefault("websites", {})[name] = url
+        self.save_config()
+
 
  
     def find_website(self, query):
@@ -804,6 +893,96 @@ class NaitroEngine:
                 f"{name.title()} does not appear to be open, {title}.",
             ]))
             return ActionResult(False, f"Not running: {name}")
+
+    def list_windows(self):
+        """Titles of every visible, non-empty top-level window, most
+        recently active first. Windows-only (uses pywin32); returns an
+        empty list everywhere else so callers never need an is_windows()
+        check of their own."""
+        if not self.is_windows():
+            return []
+        try:
+            import win32gui
+        except ImportError:
+            self.log("Window control unavailable: run 'pip install pywin32'.")
+            return []
+
+        titles = []
+
+        def _collect(hwnd, _):
+            if win32gui.IsWindowVisible(hwnd):
+                text = win32gui.GetWindowText(hwnd)
+                if text.strip():
+                    titles.append((hwnd, text))
+
+        win32gui.EnumWindows(_collect, None)
+        return titles
+
+    def _find_window(self, name):
+        """Best-match visible window handle for a spoken/typed name
+        fragment, e.g. 'chrome' matching 'PCBWay - Google Chrome'. Tries
+        an exact case-insensitive substring match first, then falls back
+        to a fuzzy match so small mishears still resolve."""
+        name = self.normalize(name)
+        windows = self.list_windows()
+        if not windows:
+            return None
+        for hwnd, title in windows:
+            if name in title.lower():
+                return hwnd, title
+        best = difflib.get_close_matches(name, [t.lower() for _, t in windows], n=1, cutoff=0.5)
+        if best:
+            for hwnd, title in windows:
+                if title.lower() == best[0]:
+                    return hwnd, title
+        return None
+
+    def control_window(self, action, name):
+        """Handles focus/minimize/maximize/restore for extract_action_target's
+        window_actions -- see NaitroEngine.extract_action_target. Distinct
+        from close_app: this manages an existing window, it never ends
+        the process."""
+        title = self.config.get("conversation", {}).get("user_title", "sir")
+        name = self.normalize(name)
+        if not self.is_windows():
+            self.respond(f"Window control is only available on Windows right now, {title}.")
+            return ActionResult(False, "Windows only")
+        try:
+            import win32con
+            import win32gui
+        except ImportError:
+            self.respond(f"I need pywin32 installed to control windows, {title}. Run: pip install pywin32")
+            return ActionResult(False, "pywin32 missing")
+
+        match = self._find_window(name)
+        if not match:
+            self.respond(f"I don't see a window open for {name}, {title}.")
+            return ActionResult(False, f"No window found: {name}")
+        hwnd, window_title = match
+
+        try:
+            if action == "focus":
+                if win32gui.IsIconic(hwnd):
+                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                win32gui.SetForegroundWindow(hwnd)
+                self.respond(f"Switching to {window_title}, {title}.")
+            elif action == "minimize":
+                win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+                self.respond(f"Minimized {window_title}, {title}.")
+            elif action == "maximize":
+                win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+                self.respond(f"Maximized {window_title}, {title}.")
+            elif action == "restore":
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                win32gui.SetForegroundWindow(hwnd)
+                self.respond(f"Restored {window_title}, {title}.")
+            else:
+                return ActionResult(False, f"Unknown window action: {action}")
+        except Exception as error:
+            self.log(f"Window control error: {error}")
+            self.respond(f"I couldn't do that to {window_title}, {title}.")
+            return ActionResult(False, str(error))
+        return ActionResult(True, f"{action} {window_title}")
 
     def process_name_map(self):
         if self.is_windows():
@@ -927,7 +1106,7 @@ class NaitroEngine:
         gemini_key = self.config.get("gemini_api_key", "").strip()
         if True:  # Always try AI
             def _ask_ai():
-                import json as _json, urllib.request as _req
+                from ai_client import AIClientError, query_ai as _query_ai
                 system_prompt = (
                     f"You are NaiTRO, a sharp, witty, loyal personal AI assistant running on a Windows PC. "
                     f"Personality: {style}. Address the user as '{title}'. "
@@ -937,45 +1116,20 @@ class NaitroEngine:
                     f"Answer only the user's latest message. Do not invent extra User questions. "
                     f"Do not write labels like User:, NaiTRO:, Assistant:, or transcript examples."
                 )
-
-                # Try Ollama first (local, no internet needed)
+                full_prompt = f"{system_prompt}\n\nUser: {text}\nNaiTRO:"
                 try:
-                    payload = _json.dumps({
-                        "model": "phi3:mini",
-                        "prompt": f"{system_prompt}\n\nUser: {text}\nNaiTRO:",
-                        "options": {"stop": ["\nUser:", "\nNaiTRO:", "\nAssistant:", "User:", "NaiTRO:", "Assistant:"]},
-                        "stream": False
-                    }).encode("utf-8")
-                    req = _req.Request(
-                        "http://localhost:11434/api/generate",
-                        data=payload,
-                        ers={"Content-Type": "application/json"},
-                        method="POST"
+                    raw = _query_ai(
+                        full_prompt,
+                        config=self.config,
+                        response_format="text",
+                        timeout=120,
+                        log=self.log,
                     )
-                    with _req.urlopen(req, timeout=120) as resp:
-                        data = _json.loads(resp.read().decode("utf-8"))
-                        reply = self.clean_ai_reply(data["response"])
-                        self.respond(reply)
-                        return
-                except Exception as e:
-                    self.log(f"Ollama unavailable: {e} — trying Gemini")
-
-                # Fallback to Gemini if Ollama isn't running
-                if gemini_key:
-                    try:
-                        payload = _json.dumps({
-                            "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser: {text}"}]}],
-                            "generationConfig": {"maxOutputTokens": 300}
-                        }).encode("utf-8")
-                        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
-                        req = _req.Request(url, data=payload, ers={"Content-Type": "application/json"}, method="POST")
-                        with _req.urlopen(req, timeout=15) as resp:
-                            data = _json.loads(resp.read().decode("utf-8"))
-                            reply = self.clean_ai_reply(data["candidates"][0]["content"]["parts"][0]["text"])
-                            self.respond(reply)
-                            return
-                    except Exception as e:
-                        self.log(f"Gemini error: {e}")
+                    reply = self.clean_ai_reply(raw)
+                    self.respond(reply)
+                    return
+                except AIClientError as exc:
+                    self.log(f"AI chat unavailable: {exc}")
 
                 self.respond(random.choice([
                     f"Both AI services are unavailable right now, {title}. Try again in a moment.",
@@ -1421,16 +1575,25 @@ class NaitroEngine:
             self.pending_confirmation = None
             return None  # expired silently; treat this as a fresh command
 
-        confirm_phrases = {"confirm push", "confirm", "yes", "yes push", "push confirm", "confirmed", "do it"}
+        confirm_phrases = {"confirm push", "confirm", "yes", "yes push", "push confirm", "confirmed", "do it", "confirm open", "open confirm"}
         cancel_phrases = {"cancel push", "cancel", "no", "never mind", "nevermind", "stop", "abort"}
 
         if command in confirm_phrases:
             self.pending_confirmation = None
             if pending["type"] == "push":
                 return self._execute_push(pending["key"], pending["project_path"])
+            if pending["type"] == "open_url":
+                name, url = pending["name"], pending["url"]
+                self._remember_website(name, url)
+                self.respond(f"Opening {name} now, {title}.")
+                self.open_url(url)
+                return ActionResult(True, url)
 
         if command in cancel_phrases:
             self.pending_confirmation = None
+            if pending["type"] == "open_url":
+                self.respond(f"Skipped it, {title}. That site was not opened or saved.")
+                return ActionResult(True, "Open cancelled")
             self.respond(f"Cancelled, {title}. Nothing was pushed.")
             return ActionResult(True, "Push cancelled")
 

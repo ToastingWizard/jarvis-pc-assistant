@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import re
-import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+
+from ai_client import query_ai as _shared_query_ai
 
 
 SEVERITIES = frozenset({"HIGH", "MEDIUM", "LOW"})
@@ -205,49 +206,20 @@ def build_review_prompt(diff_text: str, changed_files: list[str], truncated: boo
     )
 
 
-def query_ollama(prompt: str, model: str = "mistral", timeout: int = 300) -> str:
-    payload = json.dumps({
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",
-        "options": {"temperature": 0.2},
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        "http://localhost:11434/api/generate",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+def _query_review_ai(prompt: str, config: dict[str, Any], log: Callable[[str], None] | None) -> str:
+    """Thin wrapper that pins the reviewer's preferred model + timeout
+    and asks for JSON output. Delegates the actual provider fallback to
+    the shared :mod:`ai_client` module so chat and review share one
+    implementation of the Ollama-then-Gemini chain."""
+    reviewer = config.get("reviewer", {})
+    timeout = int(reviewer.get("ai_timeout_seconds", 300))
+    return _shared_query_ai(
+        prompt,
+        config=config,
+        response_format="json",
+        timeout=timeout,
+        log=log,
     )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        raw_resp = resp.read().decode("utf-8")
-    data = json.loads(raw_resp)
-    return str(data.get("response", ""))
-
-
-def query_gemini(prompt: str, api_key: str, timeout: int = 60) -> str:
-    payload = json.dumps({
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "maxOutputTokens": 2048,
-            "temperature": 0.2,
-            "responseMimeType": "application/json",
-        },
-    }).encode("utf-8")
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.5-flash:generateContent?key={api_key}"
-    )
-    req = urllib.request.Request(
-        url,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        raw_resp = resp.read().decode("utf-8")
-    data = json.loads(raw_resp)
-    return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
 def query_ai_structured(
@@ -261,20 +233,10 @@ def query_ai_structured(
     diff_body, truncated = truncate_diff(diff_text, max_chars)
     prompt = build_review_prompt(diff_body, changed_files, truncated)
 
-    raw = ""
     try:
-        model = reviewer.get("ollama_model", "phi3:mini")
-        raw = query_ollama(prompt, model=model)
-    except Exception as ollama_error:
-        if log:
-            log(f"Ollama review unavailable: {ollama_error}")
-        gemini_key = str(config.get("gemini_api_key", "")).strip()
-        if not gemini_key:
-            raise RuntimeError("Ollama unavailable and no Gemini API key configured.") from ollama_error
-        try:
-            raw = query_gemini(prompt, gemini_key)
-        except Exception as gemini_error:
-            raise RuntimeError(f"Gemini review failed: {gemini_error}") from gemini_error
+        raw = _query_review_ai(prompt, config, log)
+    except Exception as exc:
+        raise RuntimeError(f"AI review failed: {exc}") from exc
 
     issues = parse_ai_issues(raw, changed_files)
     if log and not issues and raw.strip() and raw.strip() not in ("[]", "{}"):
