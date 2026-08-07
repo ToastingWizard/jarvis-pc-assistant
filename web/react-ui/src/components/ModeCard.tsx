@@ -1,21 +1,29 @@
+import { Target, Briefcase, Clapperboard, Code } from "lucide-react";
 import Tilt from "./Tilt";
 import Reveal from "./Reveal";
-import type { Mode } from "../lib/data";
+import type { ModeInfo } from "../lib/api";
+
+/* Real modes come from the config as name/steps/style — no stored icon, so
+   cycle a fixed set by grid position. */
+const MODE_ICONS = [Target, Briefcase, Clapperboard, Code];
 
 interface Props {
-  mode: Mode;
+  mode: ModeInfo;
   i: number;
   active: boolean;
   big?: boolean;
   base?: number;
   onToggle: () => void;
+  onDelete?: () => void;
 }
 
-export default function ModeCard({ mode, i, active, big = false, base = 0.1, onToggle }: Props) {
-  const { Icon } = mode;
+export default function ModeCard({ mode, i, active, big = false, base = 0.1, onToggle, onDelete }: Props) {
+  const Icon = MODE_ICONS[i % MODE_ICONS.length];
+  const detail = mode.style || (mode.steps.length > 0 ? mode.steps.map((s) => s.name || s.url).join(" · ") : "Routine mode");
+
   return (
     <Reveal i={i} base={base}>
-      <Tilt max={8} scale={1.03} onClick={onToggle} className="cursor-pointer">
+      <Tilt max={8} scale={1.03} onClick={onToggle} className="cursor-pointer group">
         <div className={`relative rounded-2xl p-px overflow-hidden ${active ? "" : "border border-white/[0.07] bg-white/[0.015] group-hover:border-accent-25"}`}>
           {active && (
             <div
@@ -25,6 +33,15 @@ export default function ModeCard({ mode, i, active, big = false, base = 0.1, onT
                 background: "conic-gradient(transparent 0deg 200deg, rgb(var(--accent) / 0.25) 260deg, rgb(var(--accent)) 320deg, transparent 360deg)",
               }}
             />
+          )}
+          {onDelete && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              title="Delete mode"
+              className="absolute top-2 right-2 z-10 font-mono2 text-[9px] text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+            >
+              ✕
+            </button>
           )}
           <div
             className={`relative rounded-[15px] transition-colors duration-300 ${
@@ -47,7 +64,7 @@ export default function ModeCard({ mode, i, active, big = false, base = 0.1, onT
                 {mode.name}
               </div>
               <div className="text-[11px] text-zinc-500 mt-0.5">{mode.desc}</div>
-              {big && <div className="text-[11px] leading-5 text-zinc-600 mt-2.5">{mode.detail}</div>}
+              {big && <div className="text-[11px] leading-5 text-zinc-600 mt-2.5 truncate">{detail}</div>}
             </div>
             <div className="flex flex-col items-center gap-1.5 shrink-0">
               <span

@@ -4,6 +4,7 @@ dist/
 web/react-ui/dist/
 node_modules/
 package-lock.json
+.pytest_cache/
 
 # Personal config
 config/config.json
@@ -22,11 +23,16 @@ venv/
 .idea/
 .vscode/
 .vs/
+.claude/
 Desktop.ini
 Thumbs.db
 
 # Logs and local debug output
 *.log
+
+# Debug / test artifacts (icon extraction screenshots etc.)
+_*.png
+*.patch
 
 # Local-only files
 Python/reservation_demo.py

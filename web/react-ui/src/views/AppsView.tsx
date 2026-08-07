@@ -61,7 +61,7 @@ export default function AppsView({ ctx }: { ctx: Ctx }) {
                 size={44}
                 base={0.05}
                 onLaunch={(n) => { ctx.pushToast("Launching " + n, "Allocating neural resources…"); ctx.runAction("app", n); }}
-                onRemove={a.custom ? () => ctx.removeExtra("apps", a.id) : undefined}
+                onRemove={() => ctx.removeItem("app", a.name, a.id)}
               />
             ))}
           </div>

@@ -17,7 +17,7 @@ try {
 }
 
 if (-not (Test-Path $ReactIndex)) {
-    throw "React build failed — expected $ReactIndex"
+    throw "React build failed - expected $ReactIndex"
 }
 
 $content = Get-Content $ReactIndex -Raw -Encoding UTF8
@@ -43,7 +43,7 @@ python -m PyInstaller $SpecFile --noconfirm --clean
 
 $ExePath = Join-Path $PSScriptRoot "dist\NaiTRO.exe"
 if (-not (Test-Path $ExePath)) {
-    throw "Build failed — $ExePath was not created."
+    throw "Build failed - $ExePath was not created."
 }
 
 Write-Host ""

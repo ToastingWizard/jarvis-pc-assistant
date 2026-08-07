@@ -37,14 +37,36 @@ if sys.platform.startswith("win"):
 else:
     icon_file = None
 
+# Write a manifest of every bundled data file so the frozen app can verify
+# at runtime (diagnostics.verify_bundled) that each one actually exists in
+# sys._MEIPASS.  The manifest is bundled alongside the files it lists.
+manifest_lines = []
+for src, dest in data_files:
+    rel = (Path(dest) / Path(src).name).as_posix()
+    manifest_lines.append(rel)
+_manifest_file = SPEC_DIR / "build" / "bundle-manifest.txt"
+_manifest_file.parent.mkdir(parents=True, exist_ok=True)
+_manifest_file.write_text("\n".join(sorted(manifest_lines)) + "\n", encoding="utf-8")
+data_files.append((str(_manifest_file), "."))
+
 a = Analysis(
     ["Python/naitro_app.py"],
     pathex=[str(SPEC_DIR / "Python")],
     binaries=[],
     datas=data_files,
     hiddenimports=[
+        "diagnostics",
         "naitro_reviewer",
         "webview_ui",
+        "app_launcher",
+        "browser_agent",
+        "browser_agent.agent",
+        "browser_agent.executor",
+        "browser_agent.memory",
+        "browser_agent.planner",
+        "browser_agent.search",
+        "browser_agent.types",
+        "browser_agent.validator",
         # pyttsx3 loads its platform driver dynamically via importlib,
         # which PyInstaller's static analyzer can't detect on its own.
         "pyttsx3.drivers",

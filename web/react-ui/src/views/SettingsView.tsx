@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Settings, Palette, Gauge, SlidersHorizontal, Cpu, Check } from "lucide-react";
+import { Settings, Palette, Gauge, SlidersHorizontal, Cpu, KeyRound, Save, Check } from "lucide-react";
 import { ACCENTS } from "../lib/data";
+import { naitroApi, type AiStatus } from "../lib/api";
 import type { Ctx } from "../lib/types";
 import type { Flag } from "../lib/types";
 import Reveal from "../components/Reveal";
@@ -46,6 +47,51 @@ export default function SettingsView({ ctx }: { ctx: Ctx }) {
   const mm = String(Math.floor((up % 3600) / 60)).padStart(2, "0");
   const ss = String(up % 60).padStart(2, "0");
   const pct = Math.round(((ctx.speed - 0.4) / 1.8) * 100);
+
+  /* ---- Neural Uplink: bring-your-own API key ---- */
+  // The backend only ever reports booleans (has_nvidia / has_gemini),
+  // never the key itself, so the inputs start empty and show a LINKED/
+  // NO KEY badge for the actual state.
+  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
+  const [nvidiaKey, setNvidiaKey] = useState("");
+  const [geminiKey, setGeminiKey] = useState("");
+
+  const refreshAiStatus = useCallback(() => {
+    naitroApi.getDashboardData().then((d) => {
+      if (d?.ai_status) setAiStatus(d.ai_status);
+    });
+  }, []);
+
+  useEffect(() => { refreshAiStatus(); }, [refreshAiStatus]);
+
+  const saveKey = useCallback(async (provider: "nvidia" | "gemini", key: string, label: string) => {
+    const res = await naitroApi.saveAiConfig(provider, key);
+    if (provider === "nvidia") setNvidiaKey("");
+    else setGeminiKey("");
+    refreshAiStatus();
+    ctx.pushToast(res?.ok ? label + " key saved" : "Couldn't save key", res?.message || "");
+  }, [refreshAiStatus, ctx]);
+
+  const AI_ROWS = [
+    {
+      provider: "nvidia" as const,
+      label: "NVIDIA NIM",
+      hint: "Primary brain — free key at build.nvidia.com",
+      placeholder: "nvapi-...",
+      value: nvidiaKey,
+      set: setNvidiaKey,
+      linked: aiStatus?.has_nvidia ?? false,
+    },
+    {
+      provider: "gemini" as const,
+      label: "GEMINI",
+      hint: "Fallback — key at aistudio.google.com",
+      placeholder: "AIza...",
+      value: geminiKey,
+      set: setGeminiKey,
+      linked: aiStatus?.has_gemini ?? false,
+    },
+  ];
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -168,6 +214,47 @@ export default function SettingsView({ ctx }: { ctx: Ctx }) {
               <span className="w-1.5 h-1.5 rounded-full bg-accent breathe shadow-glow-sm" />
               <span className="font-mono2 text-[9px] tracking-[0.3em] text-zinc-500">ALL SYSTEMS NOMINAL</span>
             </div>
+          </Panel>
+
+          {/* AI API keys — users bring their own key; NaiTRO ships with none */}
+          <Panel title="NEURAL UPLINK" Icon={KeyRound} i={5}>
+            <div className="flex flex-col divide-y divide-white/5">
+              {AI_ROWS.map((row) => (
+                <div key={row.provider} className="py-3.5 first:pt-0 last:pb-0">
+                  <div className="flex items-center justify-between gap-4 mb-2">
+                    <div>
+                      <div className="text-[12px] font-semibold tracking-[0.2em] text-zinc-100">{row.label}</div>
+                      <div className="text-[10px] tracking-[0.06em] text-zinc-500 mt-0.5">{row.hint}</div>
+                    </div>
+                    <span className={`font-mono2 text-[8px] tracking-[0.3em] ${row.linked ? "text-accent" : "text-zinc-600"}`}>
+                      {row.linked ? "LINKED" : "NO KEY"}
+                    </span>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      value={row.value}
+                      onChange={(e) => row.set(e.target.value)}
+                      placeholder={row.placeholder}
+                      autoComplete="off"
+                      spellCheck={false}
+                      className="jtext flex-1 px-3 py-2 text-[12px] tracking-[0.08em]"
+                    />
+                    <button
+                      onClick={() => saveKey(row.provider, row.value, row.label)}
+                      disabled={!row.value.trim()}
+                      className="flex items-center gap-1 px-3 py-2 rounded-lg bg-accent-15 border border-accent-40 text-accent text-[10px] font-semibold tracking-[0.2em] hover:shadow-glow transition-shadow disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
+                    >
+                      <Save size={12} /> {row.linked ? "UPDATE" : "SAVE"}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="font-mono2 text-[8px] tracking-[0.2em] text-zinc-600 mt-3 leading-relaxed">
+              YOUR KEY NEVER LEAVES THIS MACHINE — IT'S STORED IN CONFIG.JSON. NaiTRO SHIPS WITH NO KEY;
+              THE ASSISTANT WAKES UP THE MOMENT ONE IS LINKED.
+            </p>
           </Panel>
         </div>
       </div>

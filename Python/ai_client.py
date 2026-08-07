@@ -12,8 +12,11 @@ Exposes one public function:
     query_ai(prompt, *, response_format="text"|"json", config, log)
         -> str   (raw text from the model; caller parses JSON if needed)
 
-Provider order is "Ollama first (local, no internet), then Gemini (cloud)"
-to match prior behaviour.  If neither is available the function raises
+Provider order is "NVIDIA NIM first (cloud, key-based), then Ollama
+(local, no internet), then Gemini (cloud, key-based)".  NVIDIA is tried
+first when a key is configured so the cloud model of choice takes
+priority; Ollama is the local fallback when NVIDIA is unavailable or
+unconfigured.  If no provider is available the function raises
 :class:`AIClientError` so callers can fall back to their own defaults.
 """
 from __future__ import annotations
@@ -64,6 +67,39 @@ def _ollama_generate(prompt: str, model: str, timeout: int, response_format: str
     return str(data.get("response", ""))
 
 
+def _nvidia_generate(prompt: str, api_key: str, model: str, timeout: int, response_format: str) -> str:
+    """POST to the NVIDIA NIM OpenAI-compatible chat completions endpoint.
+
+    Uses ``Bearer`` token auth with the ``nvidia_api_key``.  When JSON
+    output is requested we set ``response_format: {"type": "json_object"}``
+    (the OpenAI-compatible knob this endpoint exposes) so the model
+    returns valid JSON only — important for the structured-output
+    callers (reviewer, browser planner).
+    """
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.2,
+        "max_tokens": 2048,
+    }
+    if response_format == "json":
+        payload["response_format"] = {"type": "json_object"}
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        "https://integrate.api.nvidia.com/v1/chat/completions",
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read().decode("utf-8")
+    data = json.loads(raw)
+    return str(data["choices"][0]["message"]["content"])
+
+
 def _gemini_generate(prompt: str, api_key: str, timeout: int, response_format: str) -> str:
     """POST to the Gemini generateContent endpoint.
 
@@ -106,19 +142,20 @@ def query_ai(
     timeout: int = DEFAULT_TIMEOUT,
     log: Callable[[str], None] | None = None,
 ) -> str:
-    """Try Ollama then Gemini; raise :class:`AIClientError` if both fail.
+    """Try NVIDIA NIM, then Ollama, then Gemini; raise :class:`AIClientError` if all fail.
 
     Parameters
     ----------
     prompt:
         The full prompt (system + user content already combined).
     config:
-        Full NaiTRO config dict.  Used to read ``reviewer.ollama_model``
-        and ``gemini_api_key``.  Optional — if missing or empty we skip
-        the corresponding provider.
+        Full NaiTRO config dict.  Used to read ``reviewer.ollama_model``,
+        ``nvidia_api_key``, ``nvidia_model``, and ``gemini_api_key``.
+        Optional — if missing or empty we skip the corresponding provider.
     response_format:
-        ``"text"`` (default) or ``"json"``.  ``"json"`` makes Ollama
-        constrain to JSON and Gemini set its JSON mime type.
+        ``"text"`` (default) or ``"json"``.  ``"json"`` makes NVIDIA set
+        its JSON response_format, Ollama constrain to JSON, and Gemini set
+        its JSON mime type.
     timeout:
         Per-provider HTTP timeout in seconds.
     log:
@@ -135,26 +172,45 @@ def query_ai(
         raise ValueError(f"response_format must be 'text' or 'json', got {response_format!r}")
 
     model = str(cfg.get("reviewer", {}).get("ollama_model", "phi3:mini"))
+    nvidia_key = str(cfg.get("nvidia_api_key", "")).strip()
+    nvidia_model = str(cfg.get("nvidia_model", "meta/llama-3.3-70b-instruct"))
     gemini_key = str(cfg.get("gemini_api_key", "")).strip()
 
+    nvidia_error: Exception | None = None
     ollama_error: Exception | None = None
+
+    # 1. NVIDIA NIM — cloud, needs an API key.  Try it first.
+    if nvidia_key:
+        try:
+            return _nvidia_generate(prompt, api_key=nvidia_key, model=nvidia_model, timeout=timeout, response_format=response_format)
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError, json.JSONDecodeError, KeyError, UnicodeDecodeError, ValueError) as exc:
+            nvidia_error = exc
+            if log:
+                log(f"AI client: NVIDIA failed ({exc.__class__.__name__}); trying Ollama")
+
+    nvidia_status = (
+        f"NVIDIA failed: {nvidia_error}" if nvidia_key else "NVIDIA skipped (no API key)"
+    )
+
+    # 2. Ollama — local, no API key required.
     try:
         return _ollama_generate(prompt, model=model, timeout=timeout, response_format=response_format)
-    except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError, json.JSONDecodeError, KeyError) as exc:
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError, json.JSONDecodeError, KeyError, UnicodeDecodeError, ValueError) as exc:
         ollama_error = exc
         if log:
             log(f"AI client: Ollama unavailable ({exc.__class__.__name__}); trying Gemini")
 
+    # 3. Gemini — last cloud fallback, only if a key is configured.
     if gemini_key:
         try:
             return _gemini_generate(prompt, api_key=gemini_key, timeout=timeout, response_format=response_format)
-        except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError, json.JSONDecodeError, KeyError) as exc:
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, TimeoutError, json.JSONDecodeError, KeyError, UnicodeDecodeError, ValueError) as exc:
             if log:
                 log(f"AI client: Gemini failed ({exc.__class__.__name__})")
             raise AIClientError(
-                f"Ollama failed: {ollama_error}; Gemini also failed: {exc}"
+                f"{nvidia_status}; Ollama failed: {ollama_error}; Gemini also failed: {exc}"
             ) from exc
 
     raise AIClientError(
-        f"Ollama failed: {ollama_error}; no Gemini API key configured."
+        f"{nvidia_status}; Ollama failed: {ollama_error}; no Gemini API key configured."
     )

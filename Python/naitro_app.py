@@ -13,6 +13,11 @@ import time
 import urllib.parse
 import webbrowser
 import math
+
+from app_launcher import (
+    resolve_app, finalize_app_entry, validate_apps, launch_windows,
+    set_icon_log,
+)
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -38,6 +43,8 @@ from tkinter import (
 
 import sys
 
+import diagnostics
+
 if getattr(sys, 'frozen', False):
     # Running as compiled .exe
     APP_DIR = Path(sys.executable).resolve().parent
@@ -46,7 +53,80 @@ else:
     # sibling folder one level up, per the reorganized project structure.
     APP_DIR = Path(__file__).resolve().parent.parent / "config"
 
-CONFIG_PATH = APP_DIR / "config.json"
+
+def _real_config_candidates():
+    """Real config files to search, in priority order.
+
+    Source mode: the repo's ``config/config.json`` only.
+
+    Frozen mode: first the source-layout sibling ``dist/../config/`` —
+    an EXE launched from a repo checkout must use the SAME config that
+    ``python Python/naitro_app.py`` uses.  Before this fix the packaged
+    app blindly read a stale, auto-seeded ``dist/config.json`` and
+    ignored the user's real config entirely.  Then a portable
+    ``config.json`` next to the EXE (the standalone-deployment case).
+    """
+    if getattr(sys, 'frozen', False):
+        exe_dir = Path(sys.executable).resolve().parent
+        return [
+            exe_dir.parent / "config" / "config.json",  # repo checkout: dist/../config
+            exe_dir / "config.json",                    # portable: next to the EXE
+        ]
+    return [Path(__file__).resolve().parent.parent / "config" / "config.json"]
+
+
+def _resolve_config_path():
+    """First existing candidate wins; otherwise the primary path, so a
+    fresh install seeds a new config in the same place as before."""
+    candidates = _real_config_candidates()
+    for cand in candidates:
+        if cand.is_file():
+            return cand
+    return candidates[0]
+
+
+CONFIG_PATH = _resolve_config_path()
+
+
+def _config_candidates():
+    """Every config location the app knows about, in search order, for the
+    startup log.  Mirrors ``_real_config_candidates()`` and also notes the
+    bundled example under ``_MEIPASS`` (a seed template — never treated as
+    a real config)."""
+    candidates = [str(c) for c in _real_config_candidates()]
+    if getattr(sys, 'frozen', False):
+        meipass_dir = getattr(sys, '_MEIPASS', None)
+        if meipass_dir:
+            candidates.append(str(Path(meipass_dir) / "config" / "config.example.json"))
+    return candidates
+
+
+diagnostics.init()
+diagnostics.log_extra("naitro_app.__file__", __file__)
+diagnostics.log_extra("APP_DIR", str(APP_DIR))
+diagnostics.log_extra("CONFIG_PATH", str(CONFIG_PATH))
+diagnostics.log_config_search(str(CONFIG_PATH), _config_candidates())
+
+# Short acknowledgements spoken once, right before the FIRST voice command
+# of a session is executed. Startup itself stays silent so listening can
+# begin the instant NaiTRO launches -- see NaitroEngine.greet_first_command().
+WELCOME_BACK_MESSAGES = (
+    "Welcome back. I'll get that right away.",
+    "Good to see you again. Working on it.",
+)
+
+# Spoken phrases that turn the active mode off (see run_command).
+_DEACTIVATE_MODE_PHRASES = frozenset({
+    "baseline",
+    "deactivate mode",
+    "disable mode",
+    "turn off mode",
+    "turn off the mode",
+    "exit mode",
+    "leave mode",
+    "stop mode",
+    "mode off",
+})
 
 DEFAULT_CONFIG = {
     "wake_phrase": "hey naitro",
@@ -107,6 +187,17 @@ DEFAULT_CONFIG = {
             {"type": "website", "name": "netflix"},
         ],
     },
+    # Entries the user deleted from the launcher. deep_merge_defaults must
+    # never re-seed a default app/website the user explicitly removed.
+    "removed": {
+        "apps": [],
+        "websites": [],
+        "folders": [],
+        "playlists": [],
+    },
+    # The currently-active mode (if any). Persisted so a personality mode's
+    # AI style survives restarts. None = baseline.
+    "active_mode": None,
     "projects": {
         "naitro": ".",
     },
@@ -119,6 +210,14 @@ DEFAULT_CONFIG = {
         "merge_rule_findings": True,
         "max_diff_chars": 60000,
         "ollama_model": "phi3:mini",
+    },
+    "browser": {
+        "headless": False,
+        "channel": "",
+        "executable_path": "",
+        "default_timeout_ms": 15000,
+        "download_dir": "",
+        "screenshot_dir": "",
     },
 }
 
@@ -147,9 +246,21 @@ URL_SHORTENERS = {
 class NaitroEngine:
     def __init__(self, config_path=CONFIG_PATH, log=None):
         self.config_path = Path(config_path)
-        self.log = log or (lambda text: None)
+        # Every engine log line is ALSO written to logs/startup.log, so
+        # nothing the engine reports is lost before the UI bridge exists
+        # (in frozen mode the webview window is not up during __init__).
+        base_log = log or (lambda text: None)
+
+        def _log(text):
+            diagnostics.log(text)
+            base_log(text)
+
+        self.log = _log
+        set_icon_log(self.log)
         self.discovered_apps = None
+        diagnostics.mark(f"NaitroEngine.__init__ loading config: {self.config_path}")
         self.config = self.load_config()
+        diagnostics.mark("NaitroEngine.__init__ config loaded")
         self._is_speaking = False
         self._speech_cooldown_until = 0
         self._tts_engine = None
@@ -157,6 +268,12 @@ class NaitroEngine:
         self._speech_worker_started = False
         self.last_review = None
         self.pending_confirmation = None
+        self._browser_agent = None
+        # Set once the first voice command of this session has been
+        # acknowledged -- see greet_first_command(). Resets naturally on
+        # every fresh process launch since this is instance state, not
+        # persisted config.
+        self.session_greeted = False
 
     def is_windows(self):
         return os.name == "nt"
@@ -207,19 +324,53 @@ class NaitroEngine:
         webbrowser.open(target)
 
     def load_config(self):
-        if not self.config_path.exists():
-            self.save_config(DEFAULT_CONFIG)
-        with self.config_path.open("r", encoding="utf-8-sig") as file:
-            config = json.load(file)
-        migrated, changed = self.migrate_config(config)
-        if changed:
-            self.save_config(migrated)
-        return migrated
+        with diagnostics.timing(f"load_config ({self.config_path})"):
+            diagnostics.lookup("config", "config path", str(self.config_path))
+            if not self.config_path.exists():
+                diagnostics.log(
+                    f"[config] '{self.config_path}' missing — seeding from DEFAULT_CONFIG"
+                )
+                self.save_config(DEFAULT_CONFIG)
+            try:
+                with self.config_path.open("r", encoding="utf-8-sig") as file:
+                    config = json.load(file)
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                # A truncated/corrupted config (e.g. interrupted write or
+                # a hand-edit typo) must never brick the app. Back the bad
+                # file up, reseed from defaults, and keep booting so a demo
+                # machine recovers instead of crashing on launch.
+                backup = self.config_path.with_name(
+                    f"{self.config_path.name}.bak-{int(time.time())}"
+                )
+                try:
+                    backup.write_bytes(self.config_path.read_bytes())
+                except Exception:
+                    pass
+                diagnostics.log(
+                    f"[config] '{self.config_path.name}' unparseable ({exc}) — "
+                    f"backed up to {backup.name} and reseeded from DEFAULT_CONFIG"
+                )
+                self.save_config(DEFAULT_CONFIG)
+                with self.config_path.open("r", encoding="utf-8-sig") as file:
+                    config = json.load(file)
+            migrated, changed = self.migrate_config(config)
+            if changed:
+                self.save_config(migrated)
+            return migrated
 
     def migrate_config(self, config):
         changed = False
         config, did_change = self.deep_merge_defaults(config, DEFAULT_CONFIG)
         changed = changed or did_change
+        # Validate app entries: fill missing display_names, mark unavailable,
+        # extract icons where possible.
+        try:
+            with diagnostics.timing("migrate_config.validate_apps"):
+                if validate_apps(config, log=self.log):
+                    changed = True
+        except Exception as e:
+            diagnostics.exception("validate_apps", e)
+            self.log(f"App validation error: {e}")
         return config, changed
 
     def deep_merge_defaults(self, config, defaults):
@@ -231,12 +382,26 @@ class NaitroEngine:
             elif isinstance(value, dict) and isinstance(config.get(key), dict):
                 config[key], child_changed = self.deep_merge_defaults(config[key], value)
                 changed = changed or child_changed
+        # Honor deletions: never resurrect an entry the user removed from
+        # the launcher (see the "removed" section in DEFAULT_CONFIG).
+        removed = config.get("removed") or {}
+        for section, names in removed.items():
+            bucket = config.get(section)
+            if isinstance(bucket, dict) and names:
+                for name in names:
+                    if bucket.pop(name, None) is not None:
+                        changed = True
         return config, changed
 
     def save_config(self, config=None):
         data = config if config is not None else self.config
-        with self.config_path.open("w", encoding="utf-8") as file:
+        # Atomic write: dump to a temp file then os.replace() it over the
+        # real path. A crash / os._exit(0) mid-write can never leave a
+        # truncated config.json that bricks the next launch.
+        tmp_path = self.config_path.with_name(self.config_path.name + ".tmp")
+        with tmp_path.open("w", encoding="utf-8") as file:
             json.dump(data, file, indent=2)
+        os.replace(tmp_path, self.config_path)
 
     def refresh(self):
         self.discovered_apps = None
@@ -295,6 +460,21 @@ class NaitroEngine:
             self._ensure_speech_worker()
             self._speech_queue.put(text)
 
+    def greet_first_command(self):
+        """Speak a short, once-per-session acknowledgement right as the
+        first voice command is recognized -- never at startup.
+
+        This is called from the voice loop the instant a command is
+        confirmed to be addressed to NaiTRO, immediately before that
+        command is executed. respond() only enqueues text onto the
+        speech worker's queue and returns right away, so this never
+        delays recognizing or running the command that triggered it.
+        """
+        if self.session_greeted:
+            return
+        self.session_greeted = True
+        self.respond(random.choice(WELCOME_BACK_MESSAGES))
+
     def is_audio_output_active(self):
         return self._is_speaking or time.time() < self._speech_cooldown_until
 
@@ -316,11 +496,18 @@ class NaitroEngine:
         import edge_tts
 
         async def _save_audio(path):
+            # edge_tts supports native connect/receive timeouts (its
+            # defaults of 10s/60s can stall a voice reply on a dead
+            # network). Honor the values configured in voice.* — a
+            # timeout surfaces as an exception the speech worker catches
+            # and falls back to pyttsx3 instead of hanging forever.
             communicate = edge_tts.Communicate(
                 text,
                 voice_config.get("edge_voice", "en-GB-RyanNeural"),
                 rate=voice_config.get("edge_rate", "-4%"),
                 volume=voice_config.get("edge_volume", "+0%"),
+                connect_timeout=int(voice_config.get("edge_connect_timeout", 3)),
+                receive_timeout=int(voice_config.get("edge_receive_timeout", 20)),
             )
             await communicate.save(path)
 
@@ -416,6 +603,17 @@ class NaitroEngine:
                 return self.apply_review_fix(target)
             if kind == "push":
                 return self.push_project(target)
+
+        # Browser agent — "browser ...", "browse ...", "automate ..."
+        browser_result = self._handle_browser_command(command)
+        if browser_result is not None:
+            return browser_result
+
+        # Mode deactivation — handled before extract_action_target so phrases
+        # like "exit mode" / "stop mode" don't get captured by the close_/
+        # stop_ prefixes below.
+        if self.normalize(command) in _DEACTIVATE_MODE_PHRASES:
+            return self.deactivate_mode()
 
         action_target = self.extract_action_target(command)
         if action_target:
@@ -549,6 +747,61 @@ class NaitroEngine:
                 return True
         return False
 
+    def find_app_entry(self, name):
+        """Find an app by exact, prefix, substring, or fuzzy match against
+        config keys and installed apps.  Returns (config_key_or_name, entry)
+        or None."""
+        name = self.normalize(name)
+        apps = self.config.get("apps", {})
+
+        # Exact match
+        if name in apps:
+            return name, apps[name]
+
+        # Prefix / substring match ("google chrome" contains "chrome",
+        # "obs" is a prefix of "obs studio" in config)
+        best_key = None
+        best_score = 0
+        for key in apps:
+            if key.startswith(name) and len(name) >= 3:
+                score = 0.8 + 0.2 * (len(name) / max(len(key), 1))
+            elif name.startswith(key):
+                score = 0.6 + 0.3 * (len(key) / max(len(name), 1))
+            elif key in name:
+                score = len(key) / max(len(name), 1)
+            elif name in key:
+                score = len(name) / max(len(key), 1) * 0.5
+            else:
+                continue
+            if score > best_score:
+                best_score = score
+                best_key = key
+        if best_key and best_score >= 0.5:
+            return best_key, apps[best_key]
+
+        # Fuzzy match (config keys only — user-added apps, so safe to be looser)
+        matches = difflib.get_close_matches(
+            name, list(apps.keys()), n=1, cutoff=0.7
+        )
+        if matches:
+            return matches[0], apps[matches[0]]
+
+        # Live discovery against installed apps (Start Menu / App Paths)
+        if self.is_windows():
+            resolved = resolve_app(name)
+            if resolved and resolved.get("available"):
+                entry = {
+                    "type": ("shortcut" if resolved.get("kind") == "shortcut"
+                             else "exe"),
+                    "target": (resolved.get("launch")
+                               or resolved.get("exe_path", name)),
+                    "display_name": resolved.get("display_name", name.title()),
+                    "exe_path": resolved.get("exe_path", ""),
+                    "available": True,
+                }
+                return name, entry
+        return None
+
     def split_multi_targets(self, target):
         target = self.normalize(target)
         if not target or self.is_known_target_name(target):
@@ -570,12 +823,22 @@ class NaitroEngine:
             data = self.config.get(kind, {})
             if command in data:
                 return kind, command
-        # Fuzzy match for modes so "gaming mode" finds "gaming mode" even with typos
+        # Fuzzy match across all kinds
         for kind in ["modes", "apps", "websites", "playlists", "folders"]:
             data = self.config.get(kind, {})
             matches = difflib.get_close_matches(command, data.keys(), n=1, cutoff=0.75)
             if matches:
                 return kind, matches[0]
+        # Substring match for apps ("google chrome" -> "chrome")
+        apps = self.config.get("apps", {})
+        for key in apps:
+            if key in command and len(key) >= 3:
+                return "apps", key
+        # Live discovery against installed apps
+        if self.is_windows():
+            resolved = resolve_app(command)
+            if resolved and resolved.get("available"):
+                return "apps", command
         return None
 
     def extract_music_target(self, command):
@@ -691,12 +954,15 @@ class NaitroEngine:
         name = self.normalize(name)
 
         # Prefer apps over websites when names overlap, e.g. Spotify.
-        app = self.config.get("apps", {}).get(name)
-        if app:
-            target = app.get("target")
+        # find_app_entry handles exact, prefix, substring, fuzzy, and
+        # live discovery against installed apps.
+        match = self.find_app_entry(name)
+        if match:
+            config_key, app = match
+            target = app.get("target", config_key)
             if announce:
                 self.respond(f"Opening {name}, sir.")
-            return self.launch(target)
+            return self.launch(target, name=config_key)
 
         site = self.config.get("websites", {}).get(name)
         if site:
@@ -821,31 +1087,36 @@ class NaitroEngine:
         self.respond(f"Searching for {query}, {title}.")
         self.open_url(url)
         return ActionResult(True, url)
-    def launch(self, target):
+    def launch(self, target, name=None):
         target = os.path.expandvars(os.path.expanduser(str(target)))
+
+        if self.is_windows():
+            entry = None
+            if name:
+                entry = self.config.get("apps", {}).get(name)
+                if not isinstance(entry, dict):
+                    entry = None
+            try:
+                ok, msg = launch_windows(target, entry=entry, log=self.log)
+                return ActionResult(ok, msg)
+            except Exception as e:
+                self.log(f"Launch error: {e}")
+                return ActionResult(False, str(e))
+
+        # Linux / macOS
         try:
-            if self.is_windows():
-                os.startfile(target)
-            elif os.path.exists(target) or re.match(r"^[a-z]+://", target, re.IGNORECASE):
+            if os.path.exists(target) or re.match(
+                r"^[a-z]+://", target, re.IGNORECASE
+            ):
                 self.open_system_target(target)
             else:
-                subprocess.Popen(shlex.split(target), **self.quiet_subprocess_kwargs())
+                subprocess.Popen(
+                    shlex.split(target), **self.quiet_subprocess_kwargs()
+                )
             return ActionResult(True, target)
-        except Exception:
-            try:
-                if self.is_windows():
-                    import ctypes
-                    ret = ctypes.windll.shell32.ShellExecuteW(None, "open", target, None, None, 1)
-                    if ret > 32:
-                        return ActionResult(True, target)
-            except Exception:
-                pass
-            try:
-                subprocess.Popen(target, shell=True, **self.quiet_subprocess_kwargs())
-                return ActionResult(True, target)
-            except Exception as e2:
-                self.log(f"Launch error: {e2}")
-                return ActionResult(False, str(e2))
+        except Exception as e:
+            self.log(f"Launch error: {e}")
+            return ActionResult(False, str(e))
 
     def close_app(self, name):
         title = self.config.get("conversation", {}).get("user_title", "sir")
@@ -1018,27 +1289,45 @@ class NaitroEngine:
             "openai codex": ["codex"],
         }
 
+    def _resolve_mode(self, mode_name):
+        """Resolve a mode name to its stored (key, entry).
+
+        Mirrors the fuzzy matching NaiTRO understands in speech: exact key
+        first, then equal-normalized keys ("Study Mode" → "study mode"),
+        then a substring match on the stored key ("gaming" → "gaming mode").
+        Shared by run_mode and chat() so both agree on what key is active.
+        """
+        modes = self.config.get("modes", {})
+        if mode_name in modes:
+            return mode_name, modes[mode_name]
+        for key in modes:
+            if self.normalize(key) == self.normalize(mode_name):
+                return key, modes[key]
+        stripped = mode_name.replace(" mode", "").strip()
+        for key in modes:
+            if stripped in self.normalize(key):
+                return key, modes[key]
+        return None, None
+
     def run_mode(self, mode_name):
         title = self.config.get("conversation", {}).get("user_title", "sir")
-        modes = self.config.get("modes", {})
-        mode = modes.get(mode_name)
-        # Try without "mode" suffix e.g. "gaming" → "gaming mode"
-        if not mode:
-            for key in modes:
-                if self.normalize(key) == self.normalize(mode_name):
-                    mode = modes[key]
-                    mode_name = key
-                    break
-        if not mode:
-            stripped = mode_name.replace(" mode", "").strip()
-            for key in modes:
-                if stripped in self.normalize(key):
-                    mode = modes[key]
-                    mode_name = key
-                    break
-        if not mode:
+        resolved, mode = self._resolve_mode(mode_name)
+        if mode is None:
             self.respond(f"I don't have a routine called {mode_name}, {title}.")
             return ActionResult(False, "Mode not found")
+        mode_name = resolved
+
+        # Modes are stored either as a plain list of steps (legacy) or as
+        # {"steps": [...], "style": "..."} so a mode can also carry an AI
+        # personality. A personality-only mode has no steps and just retunes
+        # how NaiTRO talks.
+        steps = mode.get("steps") if isinstance(mode, dict) else mode
+        style = mode.get("style") if isinstance(mode, dict) else None
+
+        # Persist the active mode so the AI style applies to subsequent chat
+        # and survives restarts.
+        self.config["active_mode"] = mode_name
+        self.save_config()
 
         self.respond(random.choice([
             f"Activating {mode_name}, {title}.",
@@ -1047,7 +1336,7 @@ class NaitroEngine:
         ]))
 
         def _run():
-            for step in mode:
+            for step in steps or []:
                 delay = step.get("delay", 0.5)
                 time.sleep(delay)
                 m_type = step.get("type")
@@ -1055,9 +1344,17 @@ class NaitroEngine:
                 if m_type == "app":
                     app = self.config.get("apps", {}).get(m_name)
                     if app:
-                        self.launch(app.get("target", m_name))
+                        self.launch(app.get("target", m_name), name=m_name)
                     else:
-                        self.launch(m_name)
+                        # App not in config — try resolving live
+                        match = self.find_app_entry(m_name)
+                        if match:
+                            key, entry = match
+                            self.launch(
+                                entry.get("target", m_name), name=key
+                            )
+                        else:
+                            self.launch(m_name)
                 elif m_type == "website":
                     url = step.get("url") or self.config.get("websites", {}).get(m_name)
                     if url:
@@ -1072,9 +1369,32 @@ class NaitroEngine:
         threading.Thread(target=_run, daemon=True).start()
         return ActionResult(True, f"Started {mode_name}")
 
+    def deactivate_mode(self):
+        title = self.config.get("conversation", {}).get("user_title", "sir")
+        if not self.config.get("active_mode"):
+            self.respond(f"No mode is active, {title}. Running baseline.")
+            return ActionResult(False, "No active mode")
+        self.config["active_mode"] = None
+        self.save_config()
+        self.respond(random.choice([
+            f"Mode disengaged, {title}. Back to baseline.",
+            f"Reverting to baseline, {title}.",
+            f"Alright, {title}. Returning to standard operation.",
+        ]))
+        return ActionResult(True, "Mode deactivated")
+
     def chat(self, text):
         title = self.config.get("conversation", {}).get("user_title", "sir")
+        # An active mode with a "style" overrides the global conversation
+        # personality — personality modes retune how NaiTRO talks.
         style = self.config.get("conversation", {}).get("style", "sharp, calm, witty")
+        active = self.config.get("active_mode")
+        if active:
+            # Resolve fuzzy like run_mode — active_mode can be stored under a
+            # slightly different key than the modes dict (case, "mode" suffix).
+            _, mode = self._resolve_mode(active)
+            if isinstance(mode, dict) and mode.get("style"):
+                style = mode["style"]
         norm = self.normalize(text)
         now = datetime.now()
         hour = now.hour
@@ -1088,7 +1408,10 @@ class NaitroEngine:
 
         if any(p in norm for p in ("how are you", "you good", "you okay", "you alright")):
             return self.respond(random.choice([f"Running clean, {title}. No complaints.", f"Operational and mildly entertained, {title}.", f"Perfectly calibrated, {title}."]))
-        if any(p in norm for p in ("hello", "hi", "hey", "wassup", "sup", "yo")):
+        # Whole-word match only: plain substring matching makes "something"
+        # trigger the "hi" greeting.  \b boundaries keep "hey" from matching
+        # inside e.g. "they" and "hi" inside "something".
+        if re.search(r"\b(?:hello|hi|hey|wassup|sup|yo)\b", norm):
             return self.respond(random.choice([f"Hey {title}. What do you need?", f"Here and ready, {title}. What's the move?"]))
         if any(p in norm for p in ("thank you", "thanks", "good job", "cheers")):
             return self.respond(random.choice([f"Just doing my job, {title}.", f"Anytime, {title}.", f"Try not to make a habit of thanking the AI, {title}."]))
@@ -1122,7 +1445,7 @@ class NaitroEngine:
                         full_prompt,
                         config=self.config,
                         response_format="text",
-                        timeout=120,
+                        timeout=30,
                         log=self.log,
                     )
                     reply = self.clean_ai_reply(raw)
@@ -1131,10 +1454,26 @@ class NaitroEngine:
                 except AIClientError as exc:
                     self.log(f"AI chat unavailable: {exc}")
 
-                self.respond(random.choice([
-                    f"Both AI services are unavailable right now, {title}. Try again in a moment.",
-                    f"No AI connection at the moment, {title}. Give me a second.",
-                ]))
+                # Distinguish "no key configured yet" (a setup problem the
+                # user can fix) from "key present but providers are down"
+                # (a transient outage). On a fresh install with no key the
+                # answer points them at Settings -> Neural Uplink instead
+                # of a generic outage message.
+                has_key = bool(
+                    self.config.get("nvidia_api_key", "").strip()
+                    or self.config.get("gemini_api_key", "").strip()
+                )
+                if not has_key:
+                    self.respond(
+                        f"I can't reach the AI yet, {title} — no API key is set. "
+                        f"Open Settings, then Neural Uplink, and paste a free "
+                        f"NVIDIA NIM or Gemini key to wake me up."
+                    )
+                else:
+                    self.respond(random.choice([
+                        f"Both AI services are unavailable right now, {title}. Try again in a moment.",
+                        f"No AI connection at the moment, {title}. Give me a second.",
+                    ]))
 
             threading.Thread(target=_ask_ai, daemon=True).start()
             return ActionResult(True, "chat")
@@ -1143,7 +1482,10 @@ class NaitroEngine:
         # Built-in replies
         if any(p in norm for p in ("how are you", "you good", "you okay", "you alright")):
             return self.respond(random.choice([f"Running clean, {title}. No complaints.", f"Operational and mildly entertained, {title}.", f"Perfectly calibrated, {title}."]))
-        if any(p in norm for p in ("hello", "hi", "hey", "wassup", "sup", "yo")):
+        # Whole-word match only: plain substring matching makes "something"
+        # trigger the "hi" greeting.  \b boundaries keep "hey" from matching
+        # inside e.g. "they" and "hi" inside "something".
+        if re.search(r"\b(?:hello|hi|hey|wassup|sup|yo)\b", norm):
             return self.respond(random.choice([f"Hey {title}. What do you need?", f"Here and ready, {title}. What's the move?"]))
         if any(p in norm for p in ("thank you", "thanks", "good job", "cheers")):
             return self.respond(random.choice([f"Just doing my job, {title}.", f"Anytime, {title}.", f"Try not to make a habit of thanking the AI, {title}."]))
@@ -1613,6 +1955,109 @@ class NaitroEngine:
         self.respond(f"Git push failed for {key}, {title}. I logged the details.")
         return ActionResult(False, "Push failed")
 
+    # ------------------------------------------------------------------ browser agent
+
+    def _get_browser_agent(self):
+        if self._browser_agent is None:
+            try:
+                from browser_agent import BrowserAgent
+                self._browser_agent = BrowserAgent(
+                    config=self.config, log=self.log
+                )
+            except Exception as exc:
+                self.log(f"Browser agent unavailable: {exc}")
+                return None
+        return self._browser_agent
+
+    def close_browser(self):
+        if self._browser_agent is not None:
+            self._browser_agent.close_browser()
+            self._browser_agent = None
+
+    def _handle_browser_command(self, command):
+        """Detect and handle browser-agent commands.  Returns an
+        :class:`ActionResult` if the command was consumed, or ``None``
+        so normal parsing continues."""
+        text = (command or "").strip()
+        norm = self.normalize(text)
+        title = self.config.get("conversation", {}).get("user_title", "sir")
+
+        # "close browser" / "stop browser" / "kill browser"
+        if any(p in norm for p in ("close browser", "stop browser", "kill browser")):
+            self.close_browser()
+            self.respond(f"Browser closed, {title}.")
+            return ActionResult(True, "Browser closed")
+
+        # Bare "browser" / "open browser" — start the browser
+        if norm in ("browser", "open browser", "start browser", "launch browser", "start browsing"):
+            agent = self._get_browser_agent()
+            if agent is None:
+                self.respond(f"Browser agent not available, {title}. Check that Playwright is installed.")
+                return ActionResult(False, "Browser agent unavailable")
+            result = agent.start_browser()
+            self.respond(result.get("message", "Browser started") + f", {title}.")
+            return ActionResult(True, "Browser started")
+
+        # "browser tabs" / "list tabs" — needs agent but no Playwright
+        if any(p in norm for p in ("browser tabs", "list tabs", "show tabs")):
+            agent = self._get_browser_agent()
+            if agent is None:
+                self.respond(f"Browser agent not available, {title}.")
+                return ActionResult(False, "Browser agent unavailable")
+            tabs = agent.tabs()
+            if not tabs:
+                self.respond(f"No open tabs, {title}.")
+            else:
+                lines = [f"Tab {i+1}: {t.get('title') or t.get('url') or 'untitled'}" for i, t in enumerate(tabs[:5])]
+                self.respond("Open tabs: " + "; ".join(lines))
+            return ActionResult(True, "Browser tabs")
+
+        # Strip "browser" prefix for agent commands
+        is_browser_prefix = False
+        agent_prefixes = ("browser ", "browse ", "automate ")
+        for prefix in agent_prefixes:
+            if norm.startswith(prefix):
+                text = text[len(prefix):].strip()
+                is_browser_prefix = True
+                break
+
+        if not is_browser_prefix:
+            return None
+
+        if not text:
+            # bare "browser" or "browse" with no sub-command: start browser
+            agent = self._get_browser_agent()
+            if agent is None:
+                self.respond(f"Browser agent not available, {title}. Check that Playwright is installed.")
+                return ActionResult(False, "Browser agent unavailable")
+            result = agent.start_browser()
+            self.respond(result.get("message", "Browser started") + f", {title}.")
+            return ActionResult(True, "Browser started")
+
+        # Route to the agent
+        agent = self._get_browser_agent()
+        if agent is None:
+            self.respond(f"Browser agent not available, {title}. Check that Playwright is installed.")
+            return ActionResult(False, "Browser agent unavailable")
+
+        def _run():
+            result = agent.run(text)
+            if result.get("confirmation_required"):
+                action = result.get("pending_action") or {}
+                self.respond(
+                    f"Browser wants to {action.get('type', '?')} {action.get('target', '')} — "
+                    f"say 'confirm' or 'cancel'."
+                )
+            elif result.get("ok"):
+                msg = result.get("message", "Done")
+                self.respond(f"Browser: {msg}")
+            else:
+                msg = result.get("message", "Could not complete that")
+                self.respond(f"Browser: {msg}")
+
+        threading.Thread(target=_run, daemon=True).start()
+        return ActionResult(True, "browser command")
+
 class NaitroUI:
     def __init__(self):
         self.root = Tk()
@@ -1625,10 +2070,11 @@ class NaitroUI:
                 # If running as .py, look in the current folder
                 icon_path = "NaiTRO.ico"
 
+            diagnostics.lookup("icon", "Tk window icon", icon_path)
             if os.path.exists(icon_path):
                 self.root.iconbitmap(icon_path)
-        except Exception:
-            pass
+        except Exception as exc:
+            diagnostics.exception("Tk window icon lookup", exc)
         self.root.geometry("1100x750")
         self.root.configure(bg="#0a0a0a")
         
@@ -1646,8 +2092,8 @@ class NaitroUI:
             "dark": "#1e1b4b",
         }
         
-        self.engine = NaitroEngine(log=self.enqueue_log)
         self.events = queue.Queue()
+        self.engine = NaitroEngine(log=self.enqueue_log)
         self.voice_running = False
         self.orb_angle = 0
         self.orb_scale = 1.0
@@ -1664,11 +2110,15 @@ class NaitroUI:
         self.build_ui()
         self.animate()
         self.root.after(100, self.flush_events)
-        self.root.after(700, self.startup_greeting)
         self.root.after(500, self.setup_tray)
-        
+
+        # No startup greeting: NaiTRO stays silent on launch and starts
+        # listening immediately so the first command can be spoken right
+        # away. A short "welcome back" line is spoken once, right before
+        # the first recognized command runs -- see
+        # NaitroEngine.greet_first_command(), called from voice_loop().
         if self.engine.config.get("voice", {}).get("auto_start", True):
-            self.root.after(1000, self.start_voice)
+            self.root.after(0, self.start_voice)
 
     def setup_styles(self):
         style = ttk.Style()
@@ -1906,15 +2356,6 @@ class NaitroUI:
             self.sidebar.pack(side=LEFT, fill="y", before=self.main_panel)
             self.sidebar_visible = True
 
-    def startup_greeting(self):
-        greeting = "Good to see you, sir. What are we doing today?"
-        self.engine.respond(greeting)
-        # Note: we deliberately do NOT open a conversation window here.
-        # NaiTRO should wait for the wake phrase before treating anything
-        # it hears as a command — otherwise background speech (singing,
-        # TV, other people talking) gets picked up as if you were
-        # addressing it. See voice_loop() for the wake/timeout logic.
-
     def start_voice(self):
         if self.voice_running: return
         self.voice_running = True
@@ -2013,6 +2454,11 @@ class NaitroUI:
                         if addressed or window_open:
                             self.conversation_active = True
                             self.last_interaction_time = time.time()
+                            # One-time "welcome back" line, spoken right as
+                            # the first command of the session is recognized
+                            # -- never at launch. No-ops on every later
+                            # command. See NaitroEngine.greet_first_command().
+                            self.engine.greet_first_command()
                             if self.is_shutdown_request(text):
                                 self.engine.respond("Shutting down. Goodbye, sir.")
                                 self.root.after(3500, self.shutdown)
@@ -2380,7 +2826,12 @@ class ItemEditor:
         if self.kind == "apps":
             target = self.value.get().strip()
             app_type = "path" if any(target.lower().endswith(x) for x in (".exe", ".lnk", ".bat", ".url")) or "\\" in target else "command"
-            data[name] = {"type": app_type, "target": target}
+            entry = {"type": app_type, "target": target}
+            try:
+                finalize_app_entry(name, entry, log=self.ui.engine.log)
+            except Exception as e:
+                self.ui.engine.log(f"App finalize error: {e}")
+            data[name] = entry
         elif self.kind == "modes":
             try:
                 data[name] = json.loads(self.mode_text.get("1.0", END))
@@ -2417,9 +2868,12 @@ def acquire_single_instance_lock(port=47771):
 
 
 if __name__ == "__main__":
+    diagnostics.mark("entry: __main__")
     if not acquire_single_instance_lock():
+        diagnostics.log("[startup] single-instance lock held by another process — exiting")
         print("NaiTRO is already running — not starting a second instance.")
         sys.exit(0)
+    diagnostics.log("[startup] acquired single-instance lock")
 
     # Prefer the new web-based UI (webview_ui.py). Falls back to the
     # classic Tkinter interface if pywebview isn't installed or the
@@ -2429,6 +2883,15 @@ if __name__ == "__main__":
         from webview_ui import NaitroWebController
         NaitroWebController().start()
     except Exception as exc:
+        diagnostics.exception("webview_ui start", exc)
         print(f"Web UI unavailable ({exc}); falling back to the classic interface.")
-        NaitroUI().run()
+        try:
+            NaitroUI().run()
+        except Exception as fallback_exc:
+            # Don't let the fallback die silently — a fresh install that
+            # can't open either UI should print the real reason, not hang
+            # or vanish.
+            diagnostics.exception("NaitroUI fallback", fallback_exc)
+            print(f"Classic interface also failed: {fallback_exc}")
+            raise
 

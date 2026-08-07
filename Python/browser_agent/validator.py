@@ -255,8 +255,6 @@ def _should_force_confirm(action: BrowserAction) -> tuple[bool, str]:
         # deletion we ask first.
         if _selector_text_risky(action.target or ""):
             return True, f"form field is in a risky area: {action.target!r}"
-    if action.type == BrowserActionType.SUBMIT:  # not in the enum; kept for forward compat
-        return True, "form submission requires user confirmation"
     return False, ""
 
 

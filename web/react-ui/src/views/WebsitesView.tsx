@@ -66,14 +66,12 @@ export default function WebsitesView({ ctx }: { ctx: Ctx }) {
                       {URLS[s.id] ?? "custom route"}
                     </div>
                   </div>
-                  {s.custom && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); ctx.removeExtra("sites", s.id); ctx.pushToast("Route removed", s.name); }}
-                      className="absolute top-2 right-2 font-mono2 text-[9px] text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                    >
-                      ✕
-                    </button>
-                  )}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); ctx.removeItem("website", s.name, s.id); }}
+                    className="absolute top-2 right-2 font-mono2 text-[9px] text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                  >
+                    ✕
+                  </button>
                 </div>
                 <div className="hairline-x mt-4 opacity-40 group-hover:opacity-100 transition-opacity" />
                 <div className="flex items-center justify-between mt-3">

@@ -19,6 +19,7 @@ export interface Tile {
   color: string;
   hex?: boolean; // renders an Orbitron letter instead of icon
   custom?: boolean;
+  img?: string; // base64 data URI for real app icons (from backend extraction)
 }
 
 export interface FolderItem {

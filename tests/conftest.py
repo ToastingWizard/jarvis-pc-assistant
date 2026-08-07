@@ -4,15 +4,21 @@ These tests exercise NaitroEngine directly (not the Tkinter NaitroUI),
 since NaitroEngine holds all the actual decision-making logic — wake
 word / conversation gating, git push, and code review rules — and can
 be tested headlessly without a display.
+
+This conftest lives in tests/ (not Python/) because pytest only loads
+conftest files from the test root and *up* the directory tree — a
+conftest beside the source was silently ignored, which is why every
+fixture here used to be "not found". The sys.path insert points at
+Python/ so `import naitro_app` (and browser_agent, app_launcher, …)
+resolve.
 """
-import json
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "Python"))
 
 import naitro_app  # noqa: E402
 

@@ -7,15 +7,37 @@
  * without the Python backend running.
  */
 
+export interface ModeStep {
+  type: "app" | "website" | "folder" | "playlist";
+  name?: string;
+  url?: string;
+  delay?: number;
+}
+
+export interface ModeInfo {
+  name: string; // config key, e.g. "chill mode"
+  desc: string; // "2 steps" | "AI personality"
+  steps: ModeStep[];
+  style: string; // optional AI personality; "" when none
+}
+
+export interface AiStatus {
+  has_nvidia: boolean; // an NVIDIA NIM key is configured
+  has_gemini: boolean; // a Gemini key is configured
+}
+
 export interface DashboardData {
   wake_phrase: string;
   user_title: string;
   allow_push: boolean;
   speak_responses: boolean;
-  apps: Record<string, object>;
+  ai_status: AiStatus;
+  apps: Record<string, { icon?: string; available?: boolean }>;
   folders: Record<string, object>;
   websites: Record<string, object>;
-  modes: Record<string, { desc: string }>;
+  modes: Record<string, ModeInfo>;
+  active_mode: string | null;
+  picker: { apps: string[]; websites: string[]; folders: string[]; playlists: string[] };
 }
 
 export interface ActionResult {
@@ -23,10 +45,47 @@ export interface ActionResult {
   message: string;
 }
 
+export interface BrowserTab {
+  tab_id: string;
+  page_id: number;
+  url: string;
+  title: string;
+  is_active: boolean;
+}
+
+export interface BrowserSnapshot {
+  url: string;
+  title: string;
+  visible_text: string;
+  links: Array<{ text: string; href: string }>;
+  buttons: Array<{ text: string; tag: string }>;
+  forms: unknown[];
+}
+
+export interface BrowserStatus {
+  running: boolean;
+  tabs: BrowserTab[];
+  current_snapshot: BrowserSnapshot | null;
+  last_action: string;
+  pending_confirmation: unknown | null;
+}
+
+export interface BrowserRunResult {
+  ok: boolean;
+  message: string;
+  thought: string;
+  actions: unknown[];
+  error: string | null;
+  snapshot: BrowserSnapshot | null;
+  confirmation_required?: boolean;
+  pending_action?: unknown;
+}
+
 export interface EngineStatus {
   speaking: boolean;
   listening: boolean;
   conversation_active: boolean;
+  voice_error: string | null; // "mic" when the mic can't be opened; null when healthy
 }
 
 declare global {
@@ -56,15 +115,28 @@ const MOCK_DASHBOARD: DashboardData = {
   user_title: "sir",
   allow_push: true,
   speak_responses: true,
+  ai_status: { has_nvidia: false, has_gemini: false },
   apps: { Notepad: {}, Calculator: {}, Chrome: {}, Spotify: {} },
   folders: { Downloads: {}, Desktop: {}, Documents: {} },
   websites: { Youtube: {}, Google: {}, Netflix: {} },
-  modes: { "Chill Mode": { desc: "2 steps" } },
+  modes: {
+    "chill mode": {
+      name: "chill mode",
+      desc: "2 steps",
+      steps: [
+        { type: "app", name: "chrome", delay: 1 },
+        { type: "website", name: "netflix" },
+      ],
+      style: "",
+    },
+  },
+  active_mode: null,
+  picker: { apps: ["notepad", "chrome", "spotify"], websites: ["youtube", "netflix"], folders: ["downloads"], playlists: ["liked songs"] },
 };
 
 function mock<T>(name: string): T | null {
   if (name === "get_dashboard_data") return MOCK_DASHBOARD as unknown as T;
-  if (name === "get_status") return { speaking: false, listening: false, conversation_active: false } as unknown as T;
+  if (name === "get_status") return { speaking: false, listening: false, conversation_active: false, voice_error: null } as unknown as T;
   return { ok: true, message: "(preview mode — no engine attached)" } as unknown as T;
 }
 
@@ -75,11 +147,25 @@ export const naitroApi = {
   sendCommand: (text: string) => call<ActionResult>("send_command", text),
   addItem: (kind: "app" | "folder" | "website", name: string, target: string) =>
     call<ActionResult>("add_item", kind, name, target),
+  removeItem: (kind: "app" | "folder" | "website" | "playlist", name: string) =>
+    call<ActionResult>("remove_item", kind, name),
+  saveMode: (name: string, steps: ModeStep[], style: string) =>
+    call<ActionResult>("save_mode", name, steps, style),
+  deleteMode: (name: string) => call<ActionResult>("delete_mode", name),
+  deactivateMode: () => call<ActionResult>("deactivate_mode"),
   setSetting: (key: string, value: boolean) => call<ActionResult>("set_setting", key, value),
+  saveAiConfig: (provider: "nvidia" | "gemini", key: string) =>
+    call<ActionResult>("save_ai_config", provider, key),
   toggleVoice: (on: boolean) => call<ActionResult>("toggle_voice", on),
   getStatus: () => call<EngineStatus>("get_status"),
   minimize: () => call("minimize"),
   close: () => call("close"),
+  browserStatus: () => call<BrowserStatus>("browser_status"),
+  browserStart: () => call<ActionResult>("browser_start"),
+  browserStop: () => call<ActionResult>("browser_stop"),
+  browserCommand: (text: string) => call<BrowserRunResult>("browser_command", text),
+  browserTabs: () => call<{ tabs: BrowserTab[]; current_snapshot: BrowserSnapshot | null }>("browser_tabs"),
+  browserExecute: (action: object) => call<ActionResult>("browser_execute", action),
 };
 
 /** Subscribe to engine.log() output (window.naitroLog is called by

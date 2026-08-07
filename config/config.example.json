@@ -1,6 +1,8 @@
 {
   "wake_phrase": "hey naitro",
   "gemini_api_key": "",
+  "nvidia_api_key": "",
+  "nvidia_model": "meta/llama-3.3-70b-instruct",
   "voice": {
     "enabled": false,
     "speak_responses": true,

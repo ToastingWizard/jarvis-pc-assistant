@@ -186,10 +186,12 @@ def parse_search_command(text: str) -> tuple[str, str] | None:
         return None
     m = _SEARCH_VERB_RE.match(norm)
     if m:
-        return m.group(1).strip(), m.group(2).strip()
+        # Returns (site, query) — group(2)=site, group(1)=query
+        return m.group(2).strip(), m.group(1).strip()
     m = _SEARCH_VERB_REVERSE_RE.match(norm)
     if m:
-        return m.group(2).strip(), m.group(1).strip()
+        # Returns (site, query) — group(1)=site, group(2)=query
+        return m.group(1).strip(), m.group(2).strip()
     m = _GOOGLE_BARE_RE.match(norm)
     if m:
         return "google", m.group(1).strip()

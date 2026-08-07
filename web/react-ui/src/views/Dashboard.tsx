@@ -1,6 +1,6 @@
 import { LayoutGrid, Folder, Globe, Zap, ArrowRight } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { MODES } from "../lib/data";
+import { naitroApi, type ModeInfo } from "../lib/api";
 import type { Ctx } from "../lib/types";
 import NaitroCore from "../components/NaitroCore";
 import Panel from "../components/Panel";
@@ -12,6 +12,18 @@ export default function Dashboard({ ctx }: { ctx: Ctx }) {
   const launch = (name: string) => {
     ctx.pushToast("Launching " + name, "Allocating neural resources…");
     ctx.runAction("app", name);
+  };
+
+  const toggle = (m: ModeInfo) => {
+    if (ctx.activeMode === m.name) {
+      ctx.setActiveMode(null);
+      ctx.pushToast("MODE DISENGAGED", "Returning to baseline systems");
+      naitroApi.deactivateMode();
+    } else {
+      ctx.setActiveMode(m.name);
+      ctx.pushToast(`${m.name.toUpperCase()} ENGAGED`, m.desc);
+      ctx.runAction("mode", m.name);
+    }
   };
 
   return (
@@ -70,7 +82,7 @@ export default function Dashboard({ ctx }: { ctx: Ctx }) {
                 i={i}
                 base={0.2}
                 onLaunch={launch}
-                onRemove={a.custom ? () => ctx.removeExtra("apps", a.id) : undefined}
+                onRemove={() => ctx.removeItem("app", a.name, a.id)}
               />
             ))}
           </div>
@@ -93,7 +105,7 @@ export default function Dashboard({ ctx }: { ctx: Ctx }) {
                 i={i}
                 base={0.26}
                 onOpen={() => { ctx.setView("folders"); }}
-                onRemove={f.custom ? () => ctx.removeExtra("folders", f.id) : undefined}
+                onRemove={() => ctx.removeItem("folder", f.name, f.id)}
               />
             ))}
           </div>
@@ -126,7 +138,7 @@ export default function Dashboard({ ctx }: { ctx: Ctx }) {
                 base={0.3}
                 size={34}
                 onLaunch={(n) => { ctx.pushToast("Opening " + n, "Routing through secure uplink…"); ctx.runAction("website", n); }}
-                onRemove={s.custom ? () => ctx.removeExtra("sites", s.id) : undefined}
+                onRemove={() => ctx.removeItem("website", s.name, s.id)}
               />
             ))}
           </div>
@@ -134,23 +146,27 @@ export default function Dashboard({ ctx }: { ctx: Ctx }) {
 
         {/* modes */}
         <Panel title="MODES" Icon={Zap} i={4} className="col-span-12">
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-            {MODES.map((m, i) => (
-              <ModeCard
-                key={m.id}
-                mode={m}
-                i={i}
-                base={0.3}
-                active={ctx.activeMode === m.id}
-                onToggle={() => {
-                  const next = ctx.activeMode === m.id ? null : m.id;
-                  ctx.setActiveMode(next);
-                  ctx.pushToast(next ? `${m.name} ENGAGED` : "MODE DISENGAGED", next ? m.desc : "Returning to baseline systems");
-                  if (next) ctx.runAction("mode", m.name);
-                }}
-              />
-            ))}
-          </div>
+          {ctx.modes.length === 0 ? (
+            <button
+              onClick={() => ctx.openModeBuilder()}
+              className="w-full grid place-items-center py-8 rounded-xl border border-dashed border-white/10 text-zinc-600 hover:text-accent hover:border-accent-40 transition-colors cursor-pointer font-mono2 text-[10px] tracking-[0.3em]"
+            >
+              FORGE YOUR FIRST MODE
+            </button>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+              {ctx.modes.map((m, i) => (
+                <ModeCard
+                  key={m.name}
+                  mode={m}
+                  i={i}
+                  base={0.3}
+                  active={ctx.activeMode === m.name}
+                  onToggle={() => toggle(m)}
+                />
+              ))}
+            </div>
+          )}
         </Panel>
       </div>
     </div>

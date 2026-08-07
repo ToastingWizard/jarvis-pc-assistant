@@ -19,18 +19,17 @@ The easiest way to get NaiTRO:
 
 No Python, Node, or other dev tools are required to just run the exe.
 
-## AI Setup (Optional, For Smart Responses)
+## AI Setup — Bring Your Own Key (For Smart Responses)
 
-NaiTRO can launch apps and automate tasks without AI.
+NaiTRO can launch apps and automate tasks with **no AI key at all** — the launcher, custom modes, and voice control all work offline.
 
-For smart AI conversations, install Ollama and the Phi-3 Mini model:
+For smart AI conversations (and the voice assistant's replies), NaiTRO uses **NVIDIA NIM** first, with **Gemini** as a fallback. The app ships with **no API key inside the EXE** — you bring your own free key and paste it into **Settings → Neural Uplink** inside the app.
 
-1. Install Ollama: https://ollama.com/download/windows
-2. Open PowerShell and run:
+1. **NVIDIA NIM (recommended, free):** grab a key at [build.nvidia.com](https://build.nvidia.com), then paste it into Settings → Neural Uplink. Default model: `meta/llama-3.3-70b-instruct`.
+2. **Gemini (fallback):** get a key at [aistudio.google.com](https://aistudio.google.com/apikey) and add it the same way.
+3. **Ollama (fully local, no cloud):** install [Ollama](https://ollama.com/download/windows), then `ollama pull phi3:mini`. NaiTRO uses it whenever it's running and no cloud key is set.
 
-   ```powershell
-   ollama pull phi3:mini
-   ```
+> Your key never leaves your machine — it's stored only in the local `config.json`, sent only to the provider you chose, and never bundled into the EXE you share. Anyone who downloads the release creates their own key.
 
 ## Features
 
@@ -38,8 +37,8 @@ For smart AI conversations, install Ollama and the Phi-3 Mini model:
 - Voice commands like `hey naitro open chrome`, then natural follow-up commands
 - Custom apps, websites, Spotify playlists, folders, and multi-step modes
 - Text command box for testing without a microphone
-- Optional local AI conversation through Ollama
-- Optional Gemini fallback with your own API key
+- AI conversation via NVIDIA NIM (free key) with Gemini and local Ollama fallbacks
+- Bring-your-own-key: the shipped EXE contains no API key
 - Minimize-to-tray support
 - One-file Windows `.exe` build with PyInstaller
 - Linux source-mode support for launching apps, opening links/folders, voice, and code review
@@ -178,6 +177,10 @@ git push origin v1.0.1
 
 Once the tag is pushed, check the repo's **Actions** tab for build progress. When it finishes, `NaiTRO.exe` appears under the new release on the **Releases** page, ready to share.
 
+## Landing Page (Your Domain)
+
+`web/site/index.html` is a self-contained marketing page (download button, BYOK setup steps, WebView2 note). Point your domain's web root at it — it needs no build step, and the Download button links straight to `https://github.com/ToastingWizard/NaiTRO/releases/latest`. To deploy, upload `index.html` to your host or wire it into a static hosting service (GitHub Pages, Netlify, Vercel, etc.) with `web/site/` as the publish directory.
+
 ## Voice Setup Notes
 
 Voice input uses `SpeechRecognition` and `PyAudio`. If PyAudio refuses to install on Windows, try:
@@ -224,7 +227,7 @@ stop ollama
 
 ## AI Code Review
 
-NaiTRO can review local Git changes with Ollama (phi3:mini) or Gemini fallback.
+NaiTRO can review local Git changes with the same AI providers (NVIDIA NIM, Gemini, or local Ollama).
 
 Voice or text examples:
 

@@ -64,7 +64,9 @@ def test_open_target_app_match_never_calls_finder(engine, monkeypatch):
     def boom(query):
         raise AssertionError("should not search when an app already matched")
     monkeypatch.setattr(engine, "find_website", boom)
-    monkeypatch.setattr(engine, "launch", lambda target: ActionResult(True, "launched"))
+    # open_target calls launch(target, name=config_key) — the stub must
+    # accept the name kwarg or it raises TypeError on the app branch.
+    monkeypatch.setattr(engine, "launch", lambda target, name=None: ActionResult(True, "launched"))
     engine.config["apps"]["notepad"] = {"type": "command", "target": "notepad"}
     result = engine.open_target("notepad", announce=False)
     assert result.ok is True
@@ -107,10 +109,16 @@ def test_open_target_second_lookup_hits_cache_not_finder(engine, monkeypatch):
     assert calls == ["pcbway"]  # finder only called once
 
 
-def test_open_target_reports_not_found_when_search_fails(engine, monkeypatch):
+def test_open_target_falls_back_to_web_search_when_finder_fails(engine, monkeypatch):
+    # When the website finder finds nothing, open_target now falls back to
+    # opening a web-search results page instead of dead-ending (so there's
+    # always something useful on screen). Nothing should be cached.
+    opened = []
     monkeypatch.setattr(engine, "find_website", lambda q: None)
+    monkeypatch.setattr(engine, "open_url", lambda url: opened.append(url))
     result = engine.open_target("totally-unknown-thing-xyz", announce=False)
-    assert result.ok is False
+    assert result.ok is True
+    assert opened and "google.com/search" in opened[0]
     assert "totally-unknown-thing-xyz" not in engine.config.get("website_cache", {})
 
 

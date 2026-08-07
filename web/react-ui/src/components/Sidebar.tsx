@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { LayoutGrid, Folder, Globe, Zap, Settings, Shapes } from "lucide-react";
+import { LayoutGrid, Folder, Globe, Zap, Settings, Shapes, Monitor } from "lucide-react";
 import type { View } from "../lib/types";
 import VoiceWidget from "./VoiceWidget";
 
@@ -9,7 +9,8 @@ const ITEMS: { id: View; label: string; Icon: typeof LayoutGrid; kbd: string }[]
   { id: "folders",   label: "FOLDERS",   Icon: Folder,     kbd: "03" },
   { id: "websites",  label: "WEBSITES",  Icon: Globe,      kbd: "04" },
   { id: "modes",     label: "MODES",     Icon: Zap,        kbd: "05" },
-  { id: "settings",  label: "SETTINGS",  Icon: Settings,   kbd: "06" },
+  { id: "browser",   label: "BROWSER",   Icon: Monitor,    kbd: "06" },
+  { id: "settings",  label: "SETTINGS",  Icon: Settings,   kbd: "07" },
 ];
 
 interface Props {

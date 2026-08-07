@@ -97,7 +97,7 @@ export default function FoldersView({ ctx }: { ctx: Ctx }) {
             >
               {ctx.folders.map((f, i) => (
                 <Reveal key={f.id} i={i} base={0.04}>
-                  <Tilt max={10} scale={1.04} onClick={() => { setOpen(f); ctx.runAction("folder", f.name); }} className="glass-panel !rounded-2xl p-5 flex flex-col items-center gap-3 cursor-pointer">
+                  <Tilt max={10} scale={1.04} onClick={() => { setOpen(f); ctx.runAction("folder", f.name); }} className="relative glass-panel !rounded-2xl p-5 flex flex-col items-center gap-3 cursor-pointer">
                     <div className="relative">
                       <div className="absolute inset-0 rounded-2xl blur-xl opacity-0 group-hover:opacity-60 transition-opacity duration-300" style={{ background: `${f.color}55` }} />
                       <Folder size={52} strokeWidth={1.1} style={{ color: f.color }} className="relative transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3" />
@@ -108,14 +108,12 @@ export default function FoldersView({ ctx }: { ctx: Ctx }) {
                         {(FOLDER_FILES[f.id] ?? FALLBACK_FILES).length} OBJECTS
                       </div>
                     </div>
-                    {f.custom && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); ctx.removeExtra("folders", f.id); ctx.pushToast("Folder removed", f.name); }}
-                        className="absolute top-2 right-2 font-mono2 text-[9px] text-zinc-600 hover:text-red-400 cursor-pointer"
-                      >
-                        ✕
-                      </button>
-                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); ctx.removeItem("folder", f.name, f.id); }}
+                      className="absolute top-2 right-2 font-mono2 text-[9px] text-zinc-600 hover:text-red-400 cursor-pointer"
+                    >
+                      ✕
+                    </button>
                   </Tilt>
                 </Reveal>
               ))}

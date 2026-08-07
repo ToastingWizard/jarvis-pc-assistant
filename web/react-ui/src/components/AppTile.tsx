@@ -26,7 +26,7 @@ export default function AppTile({ tile, i, onLaunch, onRemove, size = 40, showNa
   };
 
   return (
-    <Reveal i={i} base={base} className="relative">
+    <Reveal i={i} base={base} className="relative group">
       <Tilt onClick={launch} className="flex flex-col items-center justify-start cursor-pointer select-none">
         <div
           className="relative grid place-items-center transition-all duration-300"
@@ -46,7 +46,20 @@ export default function AppTile({ tile, i, onLaunch, onRemove, size = 40, showNa
             className="relative transition-all duration-300 group-hover:-translate-y-1.5 group-hover:scale-110 group-hover:drop-shadow-[0_0_14px_var(--tc)]"
             style={{ color: tile.color, ["--tc" as string]: `${tile.color}aa` }}
           >
-            {tile.hex ? (
+            {tile.img ? (
+              <img
+                src={tile.img}
+                alt=""
+                width={size}
+                height={size}
+                style={{
+                  objectFit: "contain",
+                  borderRadius: 8,
+                  display: "block",
+                }}
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+              />
+            ) : tile.hex ? (
               <span
                 className="grid place-items-center rounded-xl font-orbitron font-bold"
                 style={{

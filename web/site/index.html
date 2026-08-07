@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NaiTRO — Your PC's Voice Assistant</title>
+<meta name="description" content="NaiTRO is a free, local Windows voice assistant that launches apps, opens websites, runs custom routines, and talks back. Bring your own free AI key — no account, no tracking." />
+<style>
+  :root {
+    --accent: #a78bfa;
+    --accent-2: #67e8f9;
+    --bg: #050308;
+    --panel: rgba(255, 255, 255, 0.035);
+    --line: rgba(255, 255, 255, 0.09);
+    --text: #e8e8ec;
+    --muted: #8b8b96;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+  /* ambient glow + scanlines */
+  body::before {
+    content: "";
+    position: fixed; inset: 0; z-index: -2;
+    background:
+      radial-gradient(600px 420px at 15% 0%, rgba(167,139,250,0.16), transparent 60%),
+      radial-gradient(700px 500px at 85% 100%, rgba(103,232,249,0.12), transparent 60%),
+      radial-gradient(500px 400px at 70% 20%, rgba(240,171,252,0.08), transparent 60%);
+  }
+  body::after {
+    content: "";
+    position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(255,255,255,0.012) 2px 4px);
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+  .mono {
+    font-family: "JetBrains Mono", "Cascadia Code", "Consolas", monospace;
+    letter-spacing: 0.18em;
+  }
+  h1, h2, h3 { font-weight: 700; line-height: 1.15; }
+  h1 {
+    font-size: clamp(2.6rem, 8vw, 4.6rem);
+    letter-spacing: 0.12em;
+    background: linear-gradient(100deg, #fff, var(--accent) 55%, var(--accent-2));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 0 22px rgba(167,139,250,0.35));
+  }
+  .tag {
+    color: var(--muted); font-size: 0.95rem; letter-spacing: 0.05em;
+    max-width: 560px; margin: 20px auto 0;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 15px 34px; border-radius: 14px;
+    font-weight: 600; font-size: 0.92rem; letter-spacing: 0.14em;
+    text-decoration: none; cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.25s ease, border-color 0.2s;
+  }
+  .btn-primary {
+    background: linear-gradient(120deg, rgba(167,139,250,0.22), rgba(103,232,249,0.12));
+    border: 1px solid rgba(167,139,250,0.55);
+    color: #fff;
+    box-shadow: 0 0 26px rgba(167,139,250,0.35);
+  }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 0 40px rgba(167,139,250,0.55); }
+  .btn-ghost {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--line); color: var(--text);
+  }
+  .btn-ghost:hover { border-color: rgba(167,139,250,0.5); }
+  .pill {
+    display: inline-block; padding: 6px 14px; border-radius: 999px;
+    font-size: 0.7rem; letter-spacing: 0.22em;
+    border: 1px solid rgba(167,139,250,0.4);
+    background: rgba(167,139,250,0.12);
+    color: var(--accent);
+  }
+  /* top nav */
+  nav { padding: 22px 0; display: flex; align-items: center; justify-content: space-between; }
+  .logo { display: flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: 0.22em; }
+  .orb {
+    width: 34px; height: 34px; border-radius: 50%;
+    background: radial-gradient(circle at 32% 30%, #fff, var(--accent) 45%, rgba(167,139,250,0.2));
+    box-shadow: 0 0 18px rgba(167,139,250,0.6);
+    animation: pulse 3.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 14px rgba(167,139,250,0.4);} 50% { box-shadow: 0 0 26px rgba(167,139,250,0.8);} }
+  /* hero */
+  header { text-align: center; padding: 84px 0 56px; }
+  .hero-actions { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-top: 34px; }
+  .version-line { margin-top: 16px; font-size: 0.78rem; color: var(--muted); }
+  .version-line b { color: var(--accent); font-weight: 600; }
+  /* sections */
+  section { padding: 46px 0; }
+  .sec-label {
+    font-size: 0.72rem; letter-spacing: 0.34em; color: var(--accent);
+    text-transform: uppercase; margin-bottom: 14px;
+  }
+  .sec-title { font-size: clamp(1.5rem, 3.4vw, 2.1rem); letter-spacing: 0.06em; margin-bottom: 26px; }
+  .grid { display: grid; gap: 18px; }
+  .g2 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .g3 { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 18px; padding: 26px;
+    backdrop-filter: blur(8px);
+    transition: border-color 0.25s, transform 0.2s;
+  }
+  .card:hover { border-color: rgba(167,139,250,0.45); transform: translateY(-3px); }
+  .card h3 { font-size: 1.02rem; letter-spacing: 0.1em; margin-bottom: 8px; }
+  .card p { color: var(--muted); font-size: 0.9rem; }
+  .card .ico { font-size: 1.6rem; margin-bottom: 12px; }
+  /* demo frame */
+  .demo {
+    border: 1px solid var(--line); border-radius: 20px; overflow: hidden;
+    background:
+      radial-gradient(400px 300px at 50% 20%, rgba(167,139,250,0.12), transparent 70%),
+      rgba(0,0,0,0.35);
+    aspect-ratio: 16 / 9; display: grid; place-items: center;
+  }
+  .demo-placeholder { color: var(--muted); font-size: 0.8rem; letter-spacing: 0.3em; text-align: center; padding: 20px; }
+  /* steps */
+  .steps { counter-reset: st; }
+  .step { display: flex; gap: 18px; padding: 18px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  .step:last-child { border-bottom: 0; }
+  .step .n {
+    counter-increment: st; flex-shrink: 0;
+    width: 38px; height: 38px; border-radius: 12px;
+    display: grid; place-items: center;
+    font-family: "JetBrains Mono", monospace; font-weight: 700; color: var(--accent);
+    background: rgba(167,139,250,0.12); border: 1px solid rgba(167,139,250,0.4);
+  }
+  .step .n::before { content: counter(st); }
+  .step h3 { font-size: 1rem; letter-spacing: 0.08em; margin-bottom: 4px; }
+  .step p { color: var(--muted); font-size: 0.9rem; }
+  .step code {
+    background: rgba(255,255,255,0.06); border: 1px solid var(--line);
+    padding: 2px 8px; border-radius: 6px; font-size: 0.82em; color: var(--accent-2);
+  }
+  /* callout */
+  .note {
+    border: 1px solid rgba(103,232,249,0.35);
+    background: rgba(103,232,249,0.06);
+    border-radius: 14px; padding: 16px 20px;
+    font-size: 0.86rem; color: var(--text); margin-top: 20px;
+  }
+  .note b { color: var(--accent-2); }
+  footer {
+    text-align: center; padding: 40px 0 60px; color: var(--muted);
+    font-size: 0.78rem; letter-spacing: 0.12em;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+  @media (max-width: 640px) { header { padding: 56px 0 36px; } section { padding: 32px 0; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <nav>
+    <div class="logo"><span class="orb"></span> NaiTRO</div>
+    <a class="btn btn-primary" style="padding:10px 20px; font-size:0.78rem;" href="https://github.com/ToastingWizard/NaiTRO/releases/latest">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      DOWNLOAD
+    </a>
+  </nav>
+
+  <header>
+    <span class="pill">FREE &nbsp;·&nbsp; LOCAL &nbsp;·&nbsp; NO TRACKING</span>
+    <h1 style="margin-top:22px;">NaiTRO</h1>
+    <p class="tag">A voice assistant that lives on your Windows PC — launch apps and websites, run custom routines, and talk like you own the place. No cloud dependency, no account, no data leaving your machine.</p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="https://github.com/ToastingWizard/NaiTRO/releases/latest">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        DOWNLOAD FOR WINDOWS
+      </a>
+      <a class="btn btn-ghost" href="#setup">GET YOUR AI KEY</a>
+    </div>
+    <p class="version-line">Latest release: <b id="version">checking…</b> &nbsp;·&nbsp; <span class="mono">NaiTRO.exe</span> — one file, no install</p>
+  </header>
+
+  <section id="features">
+    <div class="sec-label">// Capabilities</div>
+    <h2 class="sec-title">What NaiTRO does</h2>
+    <div class="grid g3">
+      <div class="card"><div class="ico">🎙️</div><h3>VOICE ASSISTANT</h3><p>Say “hey NaiTRO, open spotify” and it listens, launches, and replies. Natural follow-ups without repeating the wake word.</p></div>
+      <div class="card"><div class="ico">🚀</div><h3>APP & SITE LAUNCHING</h3><p>Open any installed app, website, folder, or Spotify playlist by name — even ones it discovers automatically.</p></div>
+      <div class="card"><div class="ico">🎛️</div><h3>CUSTOM ROUTINES</h3><p>Build multi-step “modes” that chain apps, sites, and folders together, with an optional AI personality to change how it talks.</p></div>
+      <div class="card"><div class="ico">🧠</div><h3>AI CONVERSATION</h3><p>Smart replies through NVIDIA NIM with Gemini and local Ollama fallbacks. Bring your own free key — nothing is bundled.</p></div>
+      <div class="card"><div class="ico">🧭</div><h3>BROWSER AGENT</h3><p>Hand it a task and it opens real pages, reads them, and reports back — a little browsing brain on your desktop.</p></div>
+      <div class="card"><div class="ico">🔒</div><h3>PRIVATE BY DESIGN</h3><p>Runs locally on your PC. Your API key stays in a local config file and is never shipped, shared, or sent anywhere but the provider you choose.</p></div>
+    </div>
+  </section>
+
+  <section id="demo">
+    <div class="sec-label">// See it live</div>
+    <h2 class="sec-title">Talk to your PC</h2>
+    <div class="demo">
+      <div class="demo-placeholder">
+        ▶ DEMO VIDEO<br />
+        <span style="letter-spacing:0.18em; font-size:0.7rem;">(drop a screen recording here)</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="setup">
+    <div class="sec-label">// 60-second setup</div>
+    <h2 class="sec-title">Get started</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="n"></div>
+        <div>
+          <h3>Download & run NaiTRO.exe</h3>
+          <p>Grab the latest release from <a style="color:var(--accent);" href="https://github.com/ToastingWizard/NaiTRO/releases/latest">GitHub Releases</a>. One file — no install wizard. First launch creates a local <code>config.json</code>.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="n"></div>
+        <div>
+          <h3>Bring your own AI key (optional)</h3>
+          <p>NaiTRO ships with <b>no API key</b> — by design. The launcher, voice control, and modes all work without one. For smart replies, grab a free key at <a style="color:var(--accent-2);" href="https://build.nvidia.com">build.nvidia.com</a> (or <a style="color:var(--accent-2);" href="https://aistudio.google.com/apikey">Gemini</a>) and paste it into <code>Settings → Neural Uplink</code> in the app.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="n"></div>
+        <div>
+          <h3>Start talking</h3>
+          <p>Click the orb, then say <code>“hey NaiTRO, open chrome”</code> or type commands in the box. Build a “study mode” that opens your calendar and notes, and watch it chain everything together.</p>
+        </div>
+      </div>
+    </div>
+    <div class="note">
+      <b>Heads-up:</b> NaiTRO’s interface runs on the Microsoft Edge WebView2 runtime. Most Windows 11 machines already have it; if you see a blank window, install it with
+      <code style="color:var(--accent-2);">winget install Microsoft.EdgeWebView2Runtime</code>.
+    </div>
+  </section>
+
+  <footer>
+    <p>NaiTRO · Open source · <a href="https://github.com/ToastingWizard/NaiTRO">github.com/ToastingWizard/NaiTRO</a></p>
+    <p style="margin-top:10px; font-size:0.7rem;">Built for the fun of it — bring your own key, keep your data yours.</p>
+  </footer>
+</div>
+
+<script>
+  // Show the real latest release tag from the GitHub API; degrade silently
+  // to the generic "latest" link if the API is unreachable.
+  const versionEl = document.getElementById("version");
+  fetch("https://api.github.com/repos/ToastingWizard/NaiTRO/releases/latest", { headers: { Accept: "application/vnd.github+json" } })
+    .then((r) => (r.ok ? r.json() : Promise.reject()))
+    .then((rel) => { versionEl.textContent = rel.tag_name || "latest"; })
+    .catch(() => { versionEl.textContent = "latest"; });
+</script>
+</body>
+</html>
