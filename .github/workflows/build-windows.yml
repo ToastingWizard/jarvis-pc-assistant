@@ -40,14 +40,21 @@ jobs:
       - name: Build executable
         run: python -m PyInstaller .\NaiTRO.spec --noconfirm --clean
 
+      - name: Package ZIP (avoids Chrome/AV false-positive blocking of raw .exe)
+        run: Compress-Archive -Path dist\NaiTRO.exe -DestinationPath dist\NaiTRO.zip
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: NaiTRO-Windows
-          path: dist/NaiTRO.exe
+          path: |
+            dist/NaiTRO.exe
+            dist/NaiTRO.zip
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/NaiTRO.exe
+          files: |
+            dist/NaiTRO.exe
+            dist/NaiTRO.zip
