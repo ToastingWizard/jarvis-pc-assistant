@@ -1,408 +1,250 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import { Cpu, Globe } from "lucide-react";
+import { useCallback, useEffect, useState, useRef } from "react";
+import { naitroApi, type DashboardData, type StatusData, onNaitroLog } from "./lib/api";
+import { Home, MessageSquare, Activity, Wrench, Settings as SettingsIcon, Mic, MicOff } from "lucide-react";
 
-import { APPS, APP_ICON_CHOICES, FOLDERS, MODES, SITES } from "./lib/data";
-import type { AddKind, Ctx, ExtraItem, Flag, View } from "./lib/types";
-import { naitroApi, onNaitroLog, type DashboardData, type ModeInfo } from "./lib/api";
-import BootScreen from "./components/BootScreen";
-import ParticleField from "./components/ParticleField";
-import TopBar from "./components/TopBar";
-import Sidebar from "./components/Sidebar";
-import Toasts, { type Toast } from "./components/Toasts";
-import AddItemModal from "./components/AddItemModal";
-import ModeBuilderModal from "./components/ModeBuilderModal";
-import Dashboard from "./views/Dashboard";
-import AppsView from "./views/AppsView";
-import FoldersView from "./views/FoldersView";
-import WebsitesView from "./views/WebsitesView";
-import ModesView from "./views/ModesView";
-import SettingsView from "./views/SettingsView";
-import BrowserView from "./views/BrowserView";
+// Core Components (to be created)
+import NaiTROCore from "./components/NaiTROCore";
+import CommandBar from "./components/CommandBar";
+import QuickActions from "./components/QuickActions";
+import SystemStatus from "./components/SystemStatus";
+import ModelCard from "./components/ModelCard";
+import QuickTools from "./components/QuickTools";
+import ActivityPanel from "./components/ActivityPanel";
+import Navigation from "./components/Navigation";
 
-type Extras = Record<AddKind, ExtraItem[]>;
-const EMPTY_EXTRAS: Extras = { apps: [], folders: [], sites: [] };
-
-const loadExtras = (): Extras => {
-  try {
-    const raw = localStorage.getItem("naitro.extras");
-    if (!raw) return EMPTY_EXTRAS;
-    return { ...EMPTY_EXTRAS, ...(JSON.parse(raw) as Partial<Extras>) };
-  } catch {
-    return EMPTY_EXTRAS;
-  }
-};
-
-const VIEWS: View[] = ["dashboard", "apps", "folders", "websites", "modes", "browser", "settings"];
+type View = "home" | "chat" | "activity" | "tools" | "settings";
 
 export default function App() {
-  const [booted, setBooted] = useState(false);
-  const [view, setView] = useState<View>("dashboard");
-  const [accent, setAccent] = useState("168 85 247");
-  const [speed, setSpeed] = useState(1);
-  const [flags, setFlags] = useState<Record<Flag, boolean>>({ particles: true, scanlines: true, parallax: true, voice: true });
-  const [activeMode, setActiveMode] = useState<string | null>(null);
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const [extras, setExtras] = useState<Extras>(loadExtras);
-  const [addKind, setAddKind] = useState<AddKind | null>(null);
-  // Mode builder: undefined = closed, null = new mode, ModeInfo = editing.
-  const [builderMode, setBuilderMode] = useState<ModeInfo | null | undefined>(undefined);
-  const [maximized, setMaximized] = useState(true);
-  const [serverData, setServerData] = useState<DashboardData | null>(null);
-  const toastId = useRef(0);
-  const spot = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState<View>("home");
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [status, setStatus] = useState<StatusData | null>(null);
+  const [coreState, setCoreState] = useState<"idle" | "listening" | "thinking" | "executing" | "speaking" | "error">("idle");
+  const [statusMessage, setStatusMessage] = useState("What can I do for you?");
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
 
-  /* ---------- load real data from NaitroEngine on boot ---------- */
+  // Load dashboard data on mount
   useEffect(() => {
-    const load = () => {
-      naitroApi.getDashboardData().then((data) => {
-        if (data) {
-          setServerData(data);
-          // Fresh installs ship with no AI key. Surface the one-time hint
-          // that leads the user to Settings → Neural Uplink — the only
-          // way the voice assistant / smart replies come online.
-          if (data.ai_status && !data.ai_status.has_nvidia && !data.ai_status.has_gemini) {
-            pushToast("No AI key set", "Open Settings → Neural Uplink to enable the assistant");
-          }
-        }
-      });
+    const loadData = async () => {
+      const dashboardData = await naitroApi.getDashboardData();
+      if (dashboardData) {
+        setData(dashboardData);
+      }
     };
-    // pywebview injects window.pywebview asynchronously.  If the API
-    // isn't ready yet, wait for the pywebviewready event; otherwise
-    // fetch immediately.
-    if (typeof window !== "undefined" && !window.pywebview?.api) {
-      const handler = () => { load(); };
-      window.addEventListener("pywebviewready", handler, { once: true });
-      return () => window.removeEventListener("pywebviewready", handler);
-    }
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadData();
   }, []);
 
-  /* ---------- sync active mode from the backend (engine persists it) ---------- */
+  // Poll status
   useEffect(() => {
-    if (serverData) setActiveMode(serverData.active_mode ?? null);
-  }, [serverData]);
+    const pollStatus = async () => {
+      const currentStatus = await naitroApi.getStatus();
+      if (currentStatus) {
+        setStatus(currentStatus);
 
-  const [speechStatus, setSpeechStatus] = useState<{ who: string; text: string } | null>(null);
-  const speechStatusTimer = useRef<number | null>(null);
-  const lastVoiceError = useRef<string | null>(null);
+        // Update core state based on status
+        if (currentStatus.speaking) {
+          setCoreState("speaking");
+        } else if (currentStatus.conversation_active) {
+          setCoreState("listening");
+        } else if (currentStatus.listening) {
+          setCoreState("idle");
+        } else {
+          setCoreState("idle");
+        }
+      }
+    };
 
-  /* ---------- stream engine.log() to the center-orb status display ----------
-     Conversational lines ("YOU: ..." / "NaiTRO: ...") show under the logo
-     instead of as bottom toasts -- toasts were getting noisy/annoying during
-     back-and-forth conversation. Non-conversational diagnostic lines (no
-     "who: " prefix, e.g. TTS errors) still surface as a toast since those
-     are one-off warnings worth calling out, not part of the conversation. */
+    pollStatus();
+    const interval = setInterval(pollStatus, 500);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Listen to engine logs
   useEffect(() => {
-    return onNaitroLog((line) => {
+    const unsubscribe = onNaitroLog((line) => {
+      // Parse log lines
       const idx = line.indexOf(": ");
-      if (idx === -1) {
-        pushToast("NaiTRO", line);
-        return;
+      if (idx !== -1) {
+        const text = line.slice(idx + 2);
+        setStatusMessage(text);
       }
-      const who = line.slice(0, idx);
-      const text = line.slice(idx + 2);
-      setSpeechStatus({ who: who === "YOU" ? "You" : who, text });
-      if (speechStatusTimer.current) window.clearTimeout(speechStatusTimer.current);
-      speechStatusTimer.current = window.setTimeout(() => setSpeechStatus(null), 8000);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return unsubscribe;
   }, []);
 
-  /* ---------- live speaking/listening status ---------- */
-  useEffect(() => {
-    const iv = window.setInterval(async () => {
-      const status = await naitroApi.getStatus();
-      if (status) {
-        setFlags((f) => (f.voice === status.listening ? f : { ...f, voice: status.listening }));
-        // Toast once per mic failure (not every 800 ms poll) so a demo
-        // with an unplugged mic shows what's wrong instead of silently
-        // going mute.
-        if (status.voice_error && lastVoiceError.current !== status.voice_error) {
-          lastVoiceError.current = status.voice_error;
-          pushToast("Microphone offline", "Plug in a mic — NaiTRO is retrying");
-        } else if (!status.voice_error) {
-          lastVoiceError.current = null;
-        }
-      }
-    }, 800);
-    return () => window.clearInterval(iv);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const handleCommand = useCallback(async (text: string) => {
+    if (!text.trim()) return;
 
-  /* ---------- effects ---------- */
-  useEffect(() => { document.documentElement.style.setProperty("--accent", accent); }, [accent]);
-  useEffect(() => { document.documentElement.style.setProperty("--speed", String(speed)); }, [speed]);
-  useEffect(() => { try { localStorage.setItem("naitro.extras", JSON.stringify(extras)); } catch { /* noop */ } }, [extras]);
+    setCoreState("thinking");
+    setStatusMessage("Processing...");
 
-  /* ---------- toasts ---------- */
-  const pushToast = useCallback((title: string, msg?: string) => {
-    const id = ++toastId.current;
-    setToasts((ts) => [...ts.slice(-2), { id, title, msg }]);
-    window.setTimeout(() => setToasts((ts) => ts.filter((t) => t.id !== id)), 3380);
-  }, []);
+    const result = await naitroApi.sendCommand(text);
 
-  /* ---------- derived data (real backend data when available, mock as fallback/preview) ---------- */
-  const PALETTE = ["#a78bfa", "#f0abfc", "#67e8f9", "#6ee7b7", "#fcd34d", "#fda4af", "#93c5fd", "#e8e8ec"];
-  const colorFor = (_name: string, i: number) => PALETTE[i % PALETTE.length] ?? "#a78bfa";
-
-  const apps = useMemo(() => {
-    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-    const base = serverData
-      ? Object.keys(serverData.apps).map((name, i) => {
-          const meta = serverData.apps[name];
-          return {
-            id: name.toLowerCase(),
-            name,
-            Icon: Cpu,
-            color: colorFor(name, i),
-            img: meta?.icon || undefined,
-          };
-        })
-      : APPS;
-    // Filter localStorage extras that already exist in server data to
-    // avoid duplicate entries — the server versions carry real icons,
-    // the extras versions don't.  Use substring matching so "Minecraft"
-    // in extras is filtered when the server has "Minecraft Launcher".
-    const baseNorms = base.map((a) => norm(a.name));
-    return [
-      ...base,
-      ...extras.apps
-        .filter((e) => {
-          const en = norm(e.name);
-          return !baseNorms.some((bn) => bn === en || bn.includes(en) || en.includes(bn));
-        })
-        .map((e) => ({ id: e.id, name: e.name, Icon: APP_ICON_CHOICES[e.icon] ?? Cpu, color: e.color, custom: true })),
-    ];
-  }, [serverData, extras]);
-
-  const folders = useMemo(() => {
-    const base = serverData
-      ? Object.keys(serverData.folders).map((name, i) => ({ id: name.toLowerCase(), name, color: colorFor(name, i) }))
-      : FOLDERS;
-    const baseNames = new Set(base.map((f) => f.name.toLowerCase()));
-    return [
-      ...base,
-      ...extras.folders
-        .filter((e) => !baseNames.has(e.name.toLowerCase()))
-        .map((e) => ({ id: e.id, name: e.name, color: e.color, custom: true })),
-    ];
-  }, [serverData, extras]);
-
-  const sites = useMemo(() => {
-    const base = serverData
-      ? Object.keys(serverData.websites).map((name, i) => ({
-          id: name.toLowerCase(), name, Icon: Globe, color: colorFor(name, i), hex: true,
-        }))
-      : SITES;
-    const baseNames = new Set(base.map((s) => s.name.toLowerCase()));
-    return [
-      ...base,
-      ...extras.sites
-        .filter((e) => !baseNames.has(e.name.toLowerCase()))
-        .map((e) => ({ id: e.id, name: e.name, Icon: Globe, color: e.color, hex: true, custom: true })),
-    ];
-  }, [serverData, extras]);
-
-  const modes = useMemo(() => {
-    if (!serverData) return MODES.map((m) => ({ name: m.name, desc: m.desc, steps: [], style: "" }));
-    return Object.values(serverData.modes);
-  }, [serverData]);
-
-  const addExtra = useCallback(async (kind: AddKind, item: ExtraItem) => {
-    setExtras((p) => ({ ...p, [kind]: [...p[kind], item] }));
-    // Persist to NaiTRO's real config too, not just local browser storage.
-    const apiKind = kind === "sites" ? "website" : kind === "folders" ? "folder" : "app";
-    const result = await naitroApi.addItem(apiKind, item.name, item.name);
-    // Re-fetch dashboard data so the newly added app appears with its
-    // extracted icon (not just the user-chosen glyph from extras).
-    // This also deduplicates: once the server has the app, the extras
-    // entry is automatically filtered out by the baseNames check below.
-    const data = await naitroApi.getDashboardData();
-    if (data) setServerData(data);
-    // Show the backend's resolution message — includes whether the app
-    // was found and which target it resolved to, or a helpful hint if
-    // the name can't be found.
-    if (result && result.message) {
-      pushToast(
-        result.ok ? "Shortcut created" : "Could not find that app",
-        result.message,
-      );
-    } else {
-      pushToast("Shortcut created", item.name);
+    if (result && !result.ok) {
+      setCoreState("error");
+      setStatusMessage(result.message || "Command failed");
+      setTimeout(() => {
+        setCoreState("idle");
+        setStatusMessage("What can I do for you?");
+      }, 3000);
     }
-  }, [pushToast]);
+  }, []);
 
-  const removeItem = useCallback(async (kind: "app" | "folder" | "website", name: string, id?: string) => {
-    // Drop any matching localStorage extra first — the dashboards dedupe on
-    // name, so the shortcut vanishes immediately even before the re-fetch.
-    const addKind: AddKind = kind === "website" ? "sites" : kind === "folder" ? "folders" : "apps";
-    setExtras((p) => ({
-      ...p,
-      [addKind]: p[addKind].filter((x) => x.name !== name && x.id !== id),
-    }));
-    // Permanent delete in the real config (also recorded in config["removed"]
-    // so deep_merge_defaults can't resurrect it on the next launch).
-    const result = await naitroApi.removeItem(kind, name);
-    const data = await naitroApi.getDashboardData();
-    if (data) setServerData(data);
-    pushToast(result && result.ok ? "Shortcut deleted" : "Shortcut removed", name);
-  }, [pushToast]);
+  const toggleVoice = useCallback(async () => {
+    const newState = !voiceEnabled;
+    setVoiceEnabled(newState);
+    await naitroApi.toggleVoice(newState);
+  }, [voiceEnabled]);
 
-  const deleteMode = useCallback(async (name: string) => {
-    await naitroApi.deleteMode(name);
-    const data = await naitroApi.getDashboardData();
-    if (data) setServerData(data); // also clears active_mode if it was live
-    pushToast("Mode deleted", name);
-  }, [pushToast]);
-
-  const runAction = useCallback((kind: "app" | "folder" | "website" | "mode", name: string) => {
-    naitroApi.runAction(kind, name).then((res) => {
-      if (res && !res.ok) pushToast("Couldn't complete that", res.message || name);
-    });
-  }, [pushToast]);
-
-  const ctx: Ctx = {
-    pushToast,
-    setView,
-    openAdd: (k) => setAddKind(k),
-    removeItem,
-    deleteMode,
-    openModeBuilder: (mode) => setBuilderMode(mode ?? null),
-    modes,
-    runAction,
-    parallax: flags.parallax,
-    voice: flags.voice,
-    setVoice: (v) => {
-      setFlags((f) => ({ ...f, voice: v }));
-      naitroApi.toggleVoice(v);
-      pushToast(v ? "Voice input online" : "Voice input muted", v ? 'Say "Hey NaiTRO" anytime' : "Microphone suspended");
-    },
-    activeMode,
-    setActiveMode,
-    accent,
-    setAccent,
-    speed,
-    setSpeed,
-    flags,
-    toggleFlag: (f) => setFlags((p) => ({ ...p, [f]: !p[f] })),
-    apps,
-    folders,
-    sites,
-    speechStatus,
-  };
-
-  /* ---------- keyboard shortcuts ---------- */
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if (!booted || addKind) return;
-      const t = e.target as HTMLElement;
-      if (t.tagName === "INPUT") return;
-      const n = Number(e.key);
-      if (n >= 1 && n <= 7) setView(VIEWS[n - 1]);
-    };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, [booted, addKind]);
-
-  /* ---------- spotlight ---------- */
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (spot.current) spot.current.style.transform = `translate(${e.clientX - 320}px, ${e.clientY - 320}px)`;
-  };
-
-  const activeModeInfo = activeMode ? modes.find((m) => m.name === activeMode) : undefined;
-  const status = activeModeInfo ? activeModeInfo.name.toUpperCase() : "SYSTEM ONLINE";
+  const wakePhrase = data?.wake_phrase || "hey naitro";
 
   return (
-    <div className="h-screen w-screen overflow-hidden relative" onPointerMove={onPointerMove}>
-      {/* layers */}
-      <ParticleField rgb={accent} enabled={flags.particles && booted} />
-      <div ref={spot} className="spotlight hidden md:block" />
-      {flags.scanlines && (
-        <div className="fixed inset-0 pointer-events-none z-40 overflow-hidden">
-          <div className="absolute inset-0 scanlines opacity-70" />
-          <div className="sweep" />
-        </div>
-      )}
-      <div className="fixed inset-0 pointer-events-none noise z-40" />
-      <div className="fixed inset-0 pointer-events-none vignette z-[45]" />
+    <div className="h-screen w-screen bg-gradient-to-br from-[rgb(8,8,12)] to-[rgb(12,12,18)] text-[rgb(var(--color-text))] overflow-hidden relative">
+      {/* Subtle particle effect */}
+      <div className="particle-field">
+        <ParticleField />
+      </div>
 
-      {/* desktop shell */}
-      {booted && (
-        <div className={`relative z-10 h-full flex flex-col ${maximized ? "p-3 md:p-4 xl:p-5" : "p-6 md:p-12"}`}>
-          <motion.div
-            layout
-            className={`relative flex-1 min-h-0 flex flex-col transition-shadow duration-500 ${
-              maximized ? "" : "rounded-3xl border border-accent-15 bg-black/40 shadow-glow overflow-hidden px-4 pt-2 pb-3"
-            }`}
-          >
-            <TopBar
-              status={status}
-              voice={flags.voice}
-              setVoice={ctx.setVoice}
-              maximized={maximized}
-              onMinimize={() => naitroApi.minimize()}
-              onMaximize={() => {
-                setMaximized((m) => !m);
-                pushToast(maximized ? "Window released" : "Fullscreen engaged", maximized ? "Floating viewport mode" : "Edge-to-edge rendering");
-              }}
-              onClose={() => naitroApi.close()}
-              onOpenSettings={() => setView("settings")}
-              onPingWifi={() => pushToast("Uplink stable", "980 Mb/s — quantum relay node 7")}
-            />
-            <div className="hairline-x mb-3" />
+      {/* Noise overlay */}
+      <div className="noise-overlay" />
 
-            <div className="flex flex-1 min-h-0 gap-4 xl:gap-5">
-              <Sidebar view={view} setView={setView} voice={flags.voice} setVoice={ctx.setVoice} />
-              <div className="hairline-y self-stretch shrink-0" />
-              <main className="flex-1 min-w-0 min-h-0 relative">
-                <div className="jscroll h-full overflow-y-auto overscroll-contain pr-1">
-                  <AnimatePresence mode="wait">
-                    <motion.div
-                      key={view}
-                      initial={{ opacity: 0, y: 18, filter: "blur(4px)" }}
-                      animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-                      exit={{ opacity: 0, y: -14, filter: "blur(4px)", transition: { duration: 0.16 } }}
-                      transition={{ duration: 0.3, ease: [0.25, 0.8, 0.25, 1] }}
-                      className="h-full"
-                    >
-                      {view === "dashboard" && <Dashboard ctx={ctx} />}
-                      {view === "apps" && <AppsView ctx={ctx} />}
-                      {view === "folders" && <FoldersView ctx={ctx} />}
-                      {view === "websites" && <WebsitesView ctx={ctx} />}
-                      {view === "modes" && <ModesView ctx={ctx} />}
-                      {view === "browser" && <BrowserView ctx={ctx} />}
-                      {view === "settings" && <SettingsView ctx={ctx} />}
-                    </motion.div>
-                  </AnimatePresence>
-                </div>
-              </main>
+      {/* Main Layout */}
+      <div className="relative z-10 h-full flex">
+        {/* Left Navigation */}
+        <Navigation currentView={view} onViewChange={setView} voiceEnabled={voiceEnabled} onToggleVoice={toggleVoice} />
+
+        {/* Center Main Area */}
+        <main className="flex-1 flex flex-col items-center justify-center px-8 py-12 relative">
+          {/* Wake Phrase Indicator */}
+          <div className="absolute top-8 right-8 flex items-center gap-3 text-sm">
+            <Mic className="w-4 h-4 text-blue" />
+            <div>
+              <div className="text-[rgb(var(--color-text-muted))] text-xs uppercase tracking-wider">Wake phrase</div>
+              <div className="text-blue font-mono">&ldquo;{wakePhrase}&rdquo;</div>
             </div>
-          </motion.div>
-        </div>
-      )}
+          </div>
 
-      <Toasts toasts={toasts} />
-      <AddItemModal kind={addKind} onClose={() => setAddKind(null)} onSubmit={addExtra} />
-      <ModeBuilderModal
-        mode={builderMode}
-        onClose={() => setBuilderMode(undefined)}
-        onSaved={(res, name) => {
-          if (res && res.ok) {
-            setBuilderMode(undefined);
-            pushToast("Mode saved", name);
-            naitroApi.getDashboardData().then((data) => { if (data) setServerData(data); });
-          } else {
-            pushToast("Couldn't save mode", res?.message || name);
-          }
-        }}
-        picker={serverData?.picker ?? { apps: [], websites: [], folders: [], playlists: [] }}
-      />
+          {/* NaiTRO Core */}
+          <div className="mb-8">
+            <NaiTROCore state={coreState} />
+          </div>
 
-      <AnimatePresence>
-        {!booted && <BootScreen key="boot" onDone={() => setBooted(true)} />}
-      </AnimatePresence>
+          {/* Status */}
+          <div className="text-center mb-12">
+            <div className="text-2xl font-bold text-blue-dim mb-2 uppercase tracking-wider">
+              {coreState === "idle" && "IDLE"}
+              {coreState === "listening" && "LISTENING"}
+              {coreState === "thinking" && "THINKING"}
+              {coreState === "executing" && "EXECUTING"}
+              {coreState === "speaking" && "SPEAKING"}
+              {coreState === "error" && "ERROR"}
+            </div>
+            <div className="text-[rgb(var(--color-text-muted))]">{statusMessage}</div>
+          </div>
+
+          {/* Quick Actions */}
+          <QuickActions onAction={handleCommand} />
+
+          {/* Command Bar */}
+          <div className="w-full max-w-2xl mt-12">
+            <CommandBar onSubmit={handleCommand} />
+          </div>
+        </main>
+
+        {/* Right System Panel */}
+        <aside className="w-80 border-l border-[rgb(var(--color-border))] bg-[rgb(var(--color-bg-panel))] p-6 overflow-y-auto custom-scroll">
+          {/* System Status */}
+          <SystemStatus />
+
+          {/* Divider */}
+          <div className="divider-x my-6" />
+
+          {/* Current AI Model */}
+          <ModelCard />
+
+          {/* Divider */}
+          <div className="divider-x my-6" />
+
+          {/* Quick Tools */}
+          <QuickTools />
+
+          {/* Divider */}
+          <div className="divider-x my-6" />
+
+          {/* Recent Activity */}
+          <ActivityPanel />
+        </aside>
+      </div>
     </div>
   );
+}
+
+// Minimal particle effect component
+function ParticleField() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    let animationId: number;
+    let particles: Array<{
+      x: number;
+      y: number;
+      vx: number;
+      vy: number;
+      size: number;
+      opacity: number;
+    }> = [];
+
+    const resize = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+
+      // Create particles (very sparse)
+      const count = Math.floor((canvas.width * canvas.height) / 50000);
+      particles = Array.from({ length: count }, () => ({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        vx: (Math.random() - 0.5) * 0.3,
+        vy: (Math.random() - 0.5) * 0.3,
+        size: Math.random() * 1.5 + 0.5,
+        opacity: Math.random() * 0.3 + 0.1,
+      }));
+    };
+
+    const animate = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      particles.forEach((p) => {
+        p.x += p.vx;
+        p.y += p.vy;
+
+        if (p.x < 0) p.x = canvas.width;
+        if (p.x > canvas.width) p.x = 0;
+        if (p.y < 0) p.y = canvas.height;
+        if (p.y > canvas.height) p.y = 0;
+
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(14, 165, 233, ${p.opacity})`; // Blue particles
+        ctx.fill();
+      });
+
+      animationId = requestAnimationFrame(animate);
+    };
+
+    window.addEventListener("resize", resize);
+    resize();
+    animate();
+
+    return () => {
+      window.removeEventListener("resize", resize);
+      cancelAnimationFrame(animationId);
+    };
+  }, []);
+
+  return <canvas ref={canvasRef} className="absolute inset-0" />;
 }

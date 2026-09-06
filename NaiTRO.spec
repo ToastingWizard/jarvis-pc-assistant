@@ -50,15 +50,17 @@ _manifest_file.write_text("\n".join(sorted(manifest_lines)) + "\n", encoding="ut
 data_files.append((str(_manifest_file), "."))
 
 a = Analysis(
-    ["Python/naitro_app.py"],
+    ["naitro_main.py"],
     pathex=[str(SPEC_DIR / "Python")],
     binaries=[],
     datas=data_files,
     hiddenimports=[
         "diagnostics",
         "naitro_reviewer",
-        "webview_ui",
+        "http_server",
+        "naitro_app",
         "app_launcher",
+        "ai_client",
         "browser_agent",
         "browser_agent.agent",
         "browser_agent.executor",
@@ -71,6 +73,17 @@ a = Analysis(
         # which PyInstaller's static analyzer can't detect on its own.
         "pyttsx3.drivers",
         "pyttsx3.drivers.sapi5",
+        # FastAPI and uvicorn dependencies
+        "uvicorn.logging",
+        "uvicorn.loops",
+        "uvicorn.loops.auto",
+        "uvicorn.protocols",
+        "uvicorn.protocols.http",
+        "uvicorn.protocols.http.auto",
+        "uvicorn.protocols.websockets",
+        "uvicorn.protocols.websockets.auto",
+        "uvicorn.lifespan",
+        "uvicorn.lifespan.on",
     ],
     hookspath=[],
     hooksconfig={},

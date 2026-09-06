@@ -1,8 +1,8 @@
 {
   "wake_phrase": "hey naitro",
-  "gemini_api_key": "",
-  "nvidia_api_key": "",
+  "nvidia_api_key": "your_nvidia_api_key_here",
   "nvidia_model": "meta/llama-3.3-70b-instruct",
+  "gemini_api_key": "your_gemini_api_key_here",
   "voice": {
     "enabled": false,
     "speak_responses": true,
@@ -17,47 +17,24 @@
     "auto_start": true,
     "tts_engine": "edge_tts",
     "edge_voice": "en-GB-RyanNeural",
-    "edge_rate": "+4%",
+    "edge_rate": "-4%",
     "edge_volume": "+0%",
-    "edge_connect_timeout": 3,
-    "edge_receive_timeout": 20,
-    "edge_retry_seconds": 180,
-    "tts_chunk_chars": 500,
     "pyttsx3_rate": 175
   },
   "conversation": {
     "enabled": true,
     "name": "NaiTRO",
     "user_title": "sir",
-    "style": "sharp, calm, witty, loyal but not sycophantic",
-    "session_timeout_seconds": 600,
-    "humor_level": 6,
-    "talkativeness": 4
+    "style": "calm, witty, loyal butler",
+    "session_timeout_seconds": 600
   },
-  "apps": {
-    "notepad": {
-      "type": "command",
-      "target": "notepad"
-    },
-    "calculator": {
-      "type": "command",
-      "target": "calc"
-    },
-    "chrome": {
-      "type": "command",
-      "target": "chrome"
-    },
-    "spotify": {
-      "type": "command",
-      "target": "spotify"
-    }
-  },
+  "apps": {},
   "websites": {
     "youtube": "https://www.youtube.com",
     "google": "https://www.google.com",
-    "netflix": "https://www.netflix.com",
-    "chatgpt": "https://chatgpt.com"
+    "netflix": "https://www.netflix.com"
   },
+  "website_cache": {},
   "playlists": {
     "liked songs": "spotify:collection:tracks",
     "discover weekly": "spotify:playlist:37i9dQZEVXcQ"
@@ -67,32 +44,16 @@
     "default_playlist": "liked songs"
   },
   "folders": {
-    "downloads": "%USERPROFILE%\\Downloads",
-    "desktop": "%USERPROFILE%\\Desktop",
-    "documents": "%USERPROFILE%\\Documents"
+    "downloads": "your_downloads_folder",
+    "desktop": "your_desktop_folder"
   },
   "modes": {
-    "chill mode": [
-      {
-        "type": "app",
-        "name": "chrome",
-        "delay": 1
-      },
-      {
-        "type": "website",
-        "name": "netflix"
-      }
-    ],
-    "study mode": [
-      {
-        "type": "website",
-        "url": "https://calendar.google.com"
-      },
-      {
-        "type": "website",
-        "url": "https://docs.google.com"
-      }
-    ]
+    "chill mode": {
+      "steps": [
+        {"type": "app", "name": "spotify", "delay": 1},
+        {"type": "website", "name": "netflix"}
+      ]
+    }
   },
   "projects": {
     "naitro": "."
@@ -101,10 +62,25 @@
     "default_project": "naitro",
     "editor": "pycharm",
     "pycharm_exe": "",
-    "allow_push": true,
+    "allow_push": false,
     "use_ai": true,
     "merge_rule_findings": true,
     "max_diff_chars": 60000,
     "ollama_model": "phi3:mini"
-  }
+  },
+  "browser": {
+    "headless": false,
+    "channel": "",
+    "executable_path": "",
+    "default_timeout_ms": 15000,
+    "download_dir": "",
+    "screenshot_dir": ""
+  },
+  "removed": {
+    "apps": [],
+    "websites": [],
+    "folders": [],
+    "playlists": []
+  },
+  "active_mode": null
 }
